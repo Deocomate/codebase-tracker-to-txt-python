@@ -12,12 +12,13 @@ class FileScanner:
     def scan(self, callback=None):
         """
         Scan the project directory recursively.
-        Returns a tuple of (text_files, binary_files, ignored_items)
+        Returns a tuple of (text_files, binary_files, ignored_items, all_files)
         If callback is provided, it's called with current progress information.
         """
         text_files = []
         binary_files = []
         ignored_items = []  # Will contain directories and individual files that are ignored
+        all_files = []  # Will contain ALL files for tree structure, regardless of ignore status
         ignored_dirs = set()  # Keep track of ignored directories to avoid including files inside them
         total_files_checked = 0
 
@@ -34,6 +35,10 @@ class FileScanner:
                     parent_ignored = True
                     break
 
+            # Add directory to all_files for tree structure
+            if rel_root and rel_root != ".":
+                all_files.append(rel_root)
+
             if parent_ignored:
                 dirs[:] = []  # Clear dirs to skip processing subdirectories
                 continue
@@ -43,6 +48,9 @@ class FileScanner:
             for d in dirs:
                 dir_path = root_path / d
                 rel_path = get_relative_path(dir_path, self.project_path)
+
+                # Add all directories to all_files for tree structure
+                all_files.append(rel_path)
 
                 if self.ignore_rules.is_ignored(rel_path):
                     # Add directory to ignored items list
@@ -58,6 +66,9 @@ class FileScanner:
             for filename in files:
                 file_path = root_path / filename
                 rel_path = get_relative_path(file_path, self.project_path)
+
+                # Add all files to all_files for tree structure
+                all_files.append(rel_path)
 
                 total_files_checked += 1
                 if callback and total_files_checked % 10 == 0:
@@ -80,4 +91,4 @@ class FileScanner:
                 f"Scan complete! Found {len(text_files)} text files, {len(binary_files)} binary files, and {len(ignored_items)} ignored items",
                 total_files_checked)
 
-        return text_files, binary_files, ignored_items
+        return text_files, binary_files, ignored_items, all_files

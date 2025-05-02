@@ -2,6 +2,7 @@ import os
 import time
 from pathlib import Path
 from file_utils import ensure_directory
+from tree_builder import TreeBuilder
 
 
 class FileCombiner:
@@ -9,11 +10,12 @@ class FileCombiner:
         self.project_path = Path(project_path).absolute()
         self.output_dir = self.project_path / '.codebase'
         self.output_file = self.output_dir / 'codebase.txt'
+        self.tree_builder = TreeBuilder()
 
         # Ensure output directory exists
         ensure_directory(self.output_dir)
 
-    def combine(self, text_files, binary_files, ignored_items, ignore_rules, callback=None):
+    def combine(self, text_files, binary_files, ignored_items, ignore_rules, all_files=None, callback=None):
         """
         Combine text files into a single output file.
         Text files are included with their content, binary files just have their paths listed.
@@ -24,6 +26,7 @@ class FileCombiner:
             binary_files: List of tuples (absolute_path, relative_path) for binary files
             ignored_items: List of tuples (absolute_path, relative_path, type) for ignored items
             ignore_rules: IgnoreRules object with pattern information
+            all_files: List of all files and directories for tree structure
             callback: Optional callback function for progress updates
 
         Returns:
@@ -47,6 +50,30 @@ class FileCombiner:
                          f"   ========================================================== */\n\n"
                 outfile.write(header)
                 total_chars += len(header)
+
+                # Generate and add tree structure if we have all_files data
+                if all_files:
+                    # Extract just the directory paths from ignored_items
+                    ignored_dirs = [item for item in ignored_items if item[2] == "directory"]
+
+                    tree_structure = self.tree_builder.build_tree(
+                        self.project_path,
+                        ignored_dirs,
+                        all_files
+                    )
+
+                    tree_header = "/* PROJECT STRUCTURE\n" \
+                                  f"   {'-' * 60}\n"
+                    tree_footer = f"   {'-' * 60} */\n\n"
+
+                    # Format tree lines with leading comments
+                    tree_lines = []
+                    for line in tree_structure.split('\n'):
+                        tree_lines.append(f"   {line}")
+
+                    formatted_tree = tree_header + '\n'.join(tree_lines) + '\n' + tree_footer
+                    outfile.write(formatted_tree)
+                    total_chars += len(formatted_tree)
 
                 # Process text files
                 for absolute_path, relative_path in text_files:
