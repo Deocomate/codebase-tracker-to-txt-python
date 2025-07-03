@@ -1,0 +1,1227 @@
+/* ==========================================================
+   CODEBASE SNAPSHOT - 2025-06-15 16:07:56
+   Project: CodebaseTrackerToTxt
+   Text Files Included: 10
+   Items Ignored: 30
+   ========================================================== */
+
+/* PROJECT STRUCTURE
+   ------------------------------------------------------------
+   .
+   ├── .git/
+   │   ├── hooks/
+   │   ├── info/
+   │   ├── logs/
+   │   ├── objects/
+   │   ├── refs/
+   │   ├── config
+   │   ├── description
+   │   ├── HEAD
+   │   ├── index
+   │   └── packed-refs
+   ├── .idea/
+   │   ├── inspectionProfiles/
+   │   ├── .gitignore
+   │   ├── CodebaseTrackerToTxt.iml
+   │   ├── misc.xml
+   │   ├── modules.xml
+   │   └── vcs.xml
+   ├── .gitignore
+   ├── combiner.py
+   ├── file_utils.py
+   ├── icon.ico
+   ├── ignore_rules.py
+   ├── main.py
+   ├── README.MD
+   ├── requirements.txt
+   ├── scanner.py
+   ├── tree_builder.py
+   └── ui.py
+   ------------------------------------------------------------ */
+
+/* ===== .gitignore ===== */
+build
+dist
+Codebase Tracker.spec
+
+/* ===== combiner.py ===== */
+import os
+import time
+from pathlib import Path
+from file_utils import ensure_directory
+from tree_builder import TreeBuilder
+
+
+class FileCombiner:
+    def __init__(self, project_path):
+        self.project_path = Path(project_path).absolute()
+        self.output_dir = self.project_path / '.codebase'
+        self.output_file = self.output_dir / 'codebase.txt'
+        self.tree_builder = TreeBuilder()
+
+        ensure_directory(self.output_dir)
+
+    def combine(self, text_files, ignored_items, ignore_rules, all_files=None, callback=None):
+        try:
+            total_text_files = len(text_files)
+            ignored_count = len(ignored_items)
+            files_processed = 0
+            total_chars = 0
+            error_count = 0
+            timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+
+            with open(self.output_file, 'w', encoding='utf-8') as outfile:
+                header = f"/* ==========================================================\n" \
+                         f"   CODEBASE SNAPSHOT - {timestamp}\n" \
+                         f"   Project: {self.project_path.name}\n" \
+                         f"   Text Files Included: {total_text_files}\n" \
+                         f"   Items Ignored: {ignored_count}\n" \
+                         f"   ========================================================== */\n\n"
+                outfile.write(header)
+                total_chars += len(header)
+
+                if all_files:
+                    ignored_dirs = [item for item in ignored_items if item[2] == "directory"]
+                    tree_structure = self.tree_builder.build_tree(
+                        self.project_path,
+                        ignored_dirs,
+                        all_files
+                    )
+                    tree_header = "/* PROJECT STRUCTURE\n" \
+                                  f"   {'-' * 60}\n"
+                    tree_footer = f"   {'-' * 60} */\n\n"
+
+                    tree_lines = [f"   {line}" for line in tree_structure.split('\n')]
+                    formatted_tree = tree_header + '\n'.join(tree_lines) + '\n' + tree_footer
+                    outfile.write(formatted_tree)
+                    total_chars += len(formatted_tree)
+
+                for absolute_path, relative_path in text_files:
+                    files_processed += 1
+                    if callback:
+                        callback(f"Processing ({files_processed}/{total_text_files}): {relative_path}",
+                                 files_processed / total_text_files)
+
+                    try:
+                        with open(absolute_path, 'r', encoding='utf-8', errors='replace') as infile:
+                            content = infile.read()
+                            file_header = f"/* ===== {relative_path} ===== */\n"
+                            outfile.write(file_header)
+                            outfile.write(content)
+                            outfile.write("\n\n")
+                            total_chars += len(file_header) + len(content) + 2
+                    except Exception as e:
+                        error_count += 1
+                        error_msg = f"/* ===== ERROR: Could not read file: {relative_path} ===== */\n/* {str(e)} */\n\n"
+                        outfile.write(error_msg)
+                        total_chars += len(error_msg)
+
+                if ignored_items:
+                    rule_summary = ignore_rules.get_rule_summary()
+                    ignore_section = "\n/* ===== IGNORED FILES & DIRECTORIES ===== */\n"
+                    ignore_section += "/* The following items were excluded from the output. */\n\n"
+
+                    if rule_summary['gitignore']['found']:
+                        ignore_section += "/* Based on .gitignore patterns: */\n"
+                        for pattern in rule_summary['gitignore']['patterns']:
+                            ignore_section += f"/* {pattern} */\n"
+                        ignore_section += "\n"
+
+                    if rule_summary['watchignore']['found'] and rule_summary['watchignore']['patterns']:
+                        ignore_section += "/* Based on .watchignore patterns: */\n"
+                        for pattern in rule_summary['watchignore']['patterns']:
+                            ignore_section += f"/* {pattern} */\n"
+                        ignore_section += "\n"
+
+                    outfile.write(ignore_section)
+                    total_chars += len(ignore_section)
+
+                    ignored_dirs = sorted([item for item in ignored_items if item[2] == "directory"],
+                                          key=lambda x: x[1])
+                    ignored_files_by_rule = sorted([item for item in ignored_items if item[2] == "file"],
+                                                   key=lambda x: x[1])
+                    ignored_binary_files = sorted([item for item in ignored_items if item[2] == "binary"],
+                                                  key=lambda x: x[1])
+
+                    if ignored_dirs:
+                        outfile.write("/* Ignored directories: */\n")
+                        for _, relative_path, _ in ignored_dirs:
+                            ignored_line = f"/* {relative_path}/ */\n"
+                            outfile.write(ignored_line)
+                            total_chars += len(ignored_line)
+
+                    if ignored_files_by_rule:
+                        outfile.write("\n/* Ignored files (by rule): */\n")
+                        for _, relative_path, _ in ignored_files_by_rule:
+                            ignored_line = f"/* {relative_path} */\n"
+                            outfile.write(ignored_line)
+                            total_chars += len(ignored_line)
+
+                    if ignored_binary_files:
+                        outfile.write("\n/* Ignored binary files: */\n")
+                        for _, relative_path, _ in ignored_binary_files:
+                            ignored_line = f"/* {relative_path} */\n"
+                            outfile.write(ignored_line)
+                            total_chars += len(ignored_line)
+
+            stats = {
+                'text_files': total_text_files,
+                'binary_files': len([i for i in ignored_items if i[2] == 'binary']),
+                'ignored_items': ignored_count,
+                'total_files': total_text_files,
+                'total_chars': total_chars,
+                'errors': error_count,
+                'output_file': str(self.output_file),
+                'timestamp': timestamp
+            }
+
+            if callback:
+                callback(f"Done! Combined {total_text_files} text files into {self.output_file}", 1.0)
+
+            return True, f"Successfully combined {total_text_files} text files.", stats
+
+        except Exception as e:
+            error_msg = f"Error combining files: {str(e)}"
+            if callback:
+                callback(error_msg, 1.0)
+            return False, error_msg, {}
+
+
+/* ===== file_utils.py ===== */
+import os
+import mimetypes
+import chardet
+from pathlib import Path
+
+# Common binary file extensions
+NON_TEXT_EXTENSIONS = {
+    'jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'webp', 'ico', 'heic', 'heif', 'avif',
+    'icns', 'cur', 'mp3', 'wav', 'aac', 'ogg', 'flac', 'm4a', 'opus', 'mp4', 'mov',
+    'avi', 'mkv', 'webm', 'flv', 'wmv', 'woff', 'woff2', 'ttf', 'otf', 'eot', 'zip',
+    'rar', 'tar', 'gz', '7z', 'bz2', 'xz', 'iso', 'img', 'dmg', 'pdf', 'doc', 'docx',
+    'xls', 'xlsx', 'ppt', 'pptx', 'odt', 'ods', 'odp', 'key', 'numbers', 'pages', 'exe',
+    'dll', 'so', 'dylib', 'app', 'msi', 'deb', 'rpm', 'jar', 'db', 'sqlite', 'sqlite3',
+    'mdb', 'accdb', 'sqlitedb', 'bin', 'dat', 'class', 'pyd', 'pyc', 'pyo', 'o', 'a',
+    'lib', 'swf', 'psd', 'ai', 'eps', 'bak', 'tmp', 'temp', 'swp'
+}
+
+# MIME types that are typically text-based
+READABLE_MIME_PREFIXES = [
+    'text/', 'application/json', 'application/xml', 'application/javascript',
+    'application/typescript', 'application/x-httpd-php', 'application/x-sh',
+    'application/xhtml+xml', 'image/svg+xml', 'application/yaml',
+    'application/toml', 'application/sql', 'application/rtf', 'application/csv'
+]
+
+# Common files that are always text regardless of extension
+COMMON_TEXT_FILES = [
+    'dockerfile', 'makefile', 'readme', 'license', 'authors', 'changelog',
+    'contributing', 'procfile', 'gemfile', 'rakefile', 'jenkinsfile', 'vagrantfile',
+    'pipeline', '.env', '.gitattributes', '.gitignore', '.gitmodules', '.npmrc',
+    '.yarnrc', '.npmignore', '.babelrc', '.eslintrc', '.prettierrc', '.editorconfig',
+    '.browserslistrc', 'requirements.txt', 'pipfile', 'go.mod', 'go.sum', 'composer.json',
+    'composer.lock', 'package.json', 'package-lock.json', 'yarn.lock', 'tsconfig.json',
+    'manifest.json', 'config.xml', 'pom.xml', 'build.gradle', 'settings.gradle',
+    'cmakelists.txt'
+]
+
+
+def is_text_file(file_path):
+    """
+    Determine if a file is likely a text file that can be safely read.
+    Returns True if file is text, False if not.
+    """
+    file_path = Path(file_path)
+
+    # Check by name for common text files - check this first to ensure these are always treated as text
+    if file_path.name.lower() in COMMON_TEXT_FILES:
+        return True
+
+    # Special case for .env files and lock files
+    if file_path.name.endswith('.env') or file_path.name.endswith('.lock'):
+        return True
+
+    # Skip by extension
+    if file_path.suffix.lower().lstrip('.') in NON_TEXT_EXTENSIONS:
+        return False
+
+    # Check MIME type
+    mime_type, _ = mimetypes.guess_type(str(file_path))
+    if mime_type:
+        if any(mime_type.startswith(prefix) for prefix in READABLE_MIME_PREFIXES):
+            return True
+        if (mime_type.startswith('image/') or mime_type.startswith('audio/') or
+                mime_type.startswith('video/') or mime_type.startswith('font/')):
+            return False
+
+    # For files without extension or unknown MIME type, try to detect encoding
+    try:
+        if file_path.stat().st_size > 1024 * 1024:  # Skip files larger than 1MB
+            return False
+
+        # Read a sample of the file to detect encoding
+        with open(file_path, 'rb') as f:
+            sample = f.read(4096)  # Read first 4KB
+            if not sample:
+                return True  # Empty file is considered text
+
+            # Try to detect the encoding
+            result = chardet.detect(sample)
+            return result['encoding'] is not None and result['confidence'] > 0.7
+    except (IOError, OSError):
+        return False
+
+    # Default to non-text if we couldn't determine
+    return False
+
+
+def format_file_size(size_bytes):
+    """Format file size in a human-readable format"""
+    if size_bytes == 0:
+        return "0 Bytes"
+
+    size_units = ["Bytes", "KB", "MB", "GB", "TB"]
+    i = 0
+
+    while size_bytes >= 1024 and i < len(size_units) - 1:
+        size_bytes /= 1024
+        i += 1
+
+    return f"{size_bytes:.2f} {size_units[i]}"
+
+
+def ensure_directory(directory_path):
+    """Ensure a directory exists, create it if it doesn't"""
+    path = Path(directory_path)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def get_relative_path(file_path, base_path):
+    """Get the path of a file relative to the base path"""
+    return os.path.relpath(file_path, base_path)
+
+
+/* ===== ignore_rules.py ===== */
+import os
+import pathspec
+from pathlib import Path
+from file_utils import ensure_directory
+
+DEFAULT_IGNORE_PATTERNS = [
+    '.git/', 'node_modules/', 'vendor/', 'bower_components/', 'storage/',
+    'build/', 'dist/', 'out/', 'target/', '.svn/', '.hg/', '.bzr/', '.idea/',
+    '.vscode/', '.project/', '.settings/', '__pycache__/', '.pytest_cache/',
+    '.mypy_cache/', '.ruff_cache/', 'coverage/', 'logs/', 'tmp/', 'temp/',
+    '*.lockb', '*.log', '*.tmp', '*.bak', '*.swp', '*.DS_Store'
+]
+
+
+class IgnoreRules:
+    def __init__(self, project_path):
+        self.project_path = Path(project_path).absolute()
+        self.codebase_dir = self.project_path / '.codebase'
+        self.rules = []
+        self.gitignore_found = False
+        self.watchignore_found = False
+
+        # Store individual pattern sources for reporting
+        self.gitignore_patterns = []
+        self.watchignore_patterns = []
+        self.default_patterns = DEFAULT_IGNORE_PATTERNS.copy()
+
+        # Ensure .codebase directory exists
+        ensure_directory(self.codebase_dir)
+
+        # Load rules
+        self._load_gitignore()
+        self._load_watchignore()
+
+        # Add default patterns
+        self._add_default_patterns()
+
+    def _load_gitignore(self):
+        """Load rules from .gitignore file if it exists"""
+        gitignore_path = self.project_path / '.gitignore'
+        if gitignore_path.exists() and gitignore_path.is_file():
+            try:
+                with open(gitignore_path, 'r', encoding='utf-8') as f:
+                    gitignore_content = f.read()
+                    gitignore_lines = gitignore_content.splitlines()
+                    # Store raw patterns
+                    self.gitignore_patterns = [line for line in gitignore_lines if
+                                               line.strip() and not line.strip().startswith('#')]
+                    # Create pathspec rule
+                    self.rules.append(pathspec.PathSpec.from_lines('gitwildmatch', gitignore_lines))
+                self.gitignore_found = True
+                print(f"Loaded .gitignore rules from {gitignore_path}")
+            except Exception as e:
+                print(f"Error loading .gitignore: {e}")
+
+    def _load_watchignore(self):
+        """Load rules from .watchignore file in .codebase directory or create it if it doesn't exist"""
+        # New location in .codebase directory
+        watchignore_path = self.codebase_dir / '.watchignore'
+
+        if watchignore_path.exists() and watchignore_path.is_file():
+            try:
+                with open(watchignore_path, 'r', encoding='utf-8') as f:
+                    watchignore_content = f.read()
+                    watchignore_lines = watchignore_content.splitlines()
+                    # Store raw patterns
+                    self.watchignore_patterns = [line for line in watchignore_lines if
+                                                 line.strip() and not line.strip().startswith('#')]
+                    # Create pathspec rule
+                    self.rules.append(pathspec.PathSpec.from_lines('gitwildmatch', watchignore_lines))
+                self.watchignore_found = True
+                print(f"Loaded .watchignore rules from {watchignore_path}")
+            except Exception as e:
+                print(f"Error loading .watchignore: {e}")
+        else:
+            # Create .watchignore file in .codebase directory
+            try:
+                with open(watchignore_path, 'w', encoding='utf-8') as f:
+                    f.write("# Add your custom ignore patterns here\n")
+                    f.write("# Example: *.log\n")
+                    f.write("# Example: temp/\n")
+                print(f"Created new .watchignore file at {watchignore_path}")
+                self.watchignore_patterns = []
+            except Exception as e:
+                print(f"Error creating .watchignore: {e}")
+
+    def _add_default_patterns(self):
+        """Add default ignore patterns"""
+        self.rules.append(pathspec.PathSpec.from_lines('gitwildmatch', DEFAULT_IGNORE_PATTERNS))
+
+    def is_ignored(self, path):
+        """
+        Check if a path should be ignored based on rules.
+        Returns True if the path should be ignored.
+        """
+        # Convert to string path relative to project root
+        if isinstance(path, Path):
+            rel_path = path.relative_to(self.project_path) if path.is_absolute() else path
+            path_str = str(rel_path)
+        else:
+            # If path is already relative to project root as string
+            path_str = path
+
+        # Always ignore the .codebase directory itself
+        if path_str == '.codebase' or path_str.startswith('.codebase/'):
+            return True
+
+        # Check against all rule sets
+        for rule_set in self.rules:
+            if rule_set.match_file(path_str):
+                return True
+
+        return False
+
+    def get_rule_summary(self):
+        """Get a summary of all ignore rules for reporting"""
+        rules_info = {
+            'gitignore': {
+                'found': self.gitignore_found,
+                'patterns': self.gitignore_patterns
+            },
+            'watchignore': {
+                'found': self.watchignore_found,
+                'patterns': self.watchignore_patterns
+            },
+            'default': {
+                'patterns': self.default_patterns
+            }
+        }
+        return rules_info
+
+    def get_watchignore_path(self):
+        """Return the path to the .watchignore file"""
+        return self.codebase_dir / '.watchignore'
+
+
+/* ===== main.py ===== */
+import os
+import mimetypes
+from tkinterdnd2 import TkinterDnD
+from ui import CodebaseTrackerUI
+
+
+def main():
+    mimetypes.init()
+
+    root = TkinterDnD.Tk()
+
+    try:
+        if os.name == 'nt':
+            root.iconbitmap(default='icon.ico')
+        else:
+            import tkinter as tk
+            logo = tk.PhotoImage(file='icon.png')
+            root.iconphoto(True, logo)
+    except Exception:
+        print("Icon not found, proceeding without it.")
+
+    app = CodebaseTrackerUI(root)
+    root.mainloop()
+
+
+if __name__ == "__main__":
+    main()
+
+
+/* ===== README.MD ===== */
+# Codebase Tracker
+
+![Codebase Tracker Logo](icon.ico)
+
+## Tổng quan
+
+Codebase Tracker là một ứng dụng Python với giao diện hiện đại giúp quét và gộp toàn bộ mã nguồn dự án của bạn thành một tệp văn bản duy nhất. Được thiết kế đặc biệt để phục vụ các mục đích AI, giúp các mô hình như ChatGPT, Claude, Gemini và các trợ lý AI khác hiểu toàn bộ cấu trúc và chi tiết của codebase một cách nhanh chóng và chính xác.
+
+## Tính năng chính
+
+- **Giao diện hiện đại**: Giao diện người dùng trực quan, sạch sẽ và dễ sử dụng.
+- **Kéo & Thả**: Dễ dàng chọn thư mục dự án bằng cách kéo và thả trực tiếp vào ứng dụng.
+- **Gộp mã nguồn**: Kết hợp tất cả các tệp văn bản trong dự án thành một tệp duy nhất (`codebase.txt`).
+- **Sao chép nhanh**: Nút "Copy to Clipboard" cho phép sao chép toàn bộ nội dung đã gộp chỉ với một cú nhấp chuột.
+- **Phân loại thông minh**: Tự động phân biệt giữa tệp văn bản và tệp nhị phân.
+- **Hỗ trợ quy tắc ignore**: Tự động nhận diện và tuân thủ các quy tắc trong `.gitignore`.
+- **Tùy chỉnh ignore**: Cho phép thêm các quy tắc bỏ qua tùy chỉnh thông qua tệp `.watchignore`.
+- **Hiển thị cấu trúc dự án**: Tự động tạo một cây thư mục trong file kết quả để AI dễ dàng hình dung cấu trúc.
+- **Thống kê chi tiết**: Cung cấp thông tin trực quan về số lượng file, tổng số ký tự và các mục đã bỏ qua.
+
+## Tại sao cần Codebase Tracker?
+
+Khi làm việc với AI để phân tích hoặc hỗ trợ phát triển code, việc cung cấp toàn bộ context của dự án thường gặp các trở ngại:
+
+- Giới hạn về kích thước đầu vào của các mô hình AI.
+- Khó khăn trong việc chọn lọc file phù hợp để cung cấp cho AI.
+- Thiếu cấu trúc và tổ chức khi chia sẻ nhiều file.
+- Mất thời gian để sao chép và dán nội dung từng file riêng lẻ.
+
+Codebase Tracker giải quyết các vấn đề này bằng cách tạo ra một tệp duy nhất với cấu trúc rõ ràng, giúp AI hiểu codebase một cách toàn diện và hiệu quả hơn.
+
+## Yêu cầu hệ thống
+
+- Python 3.7 trở lên
+- Hệ điều hành: Windows, macOS, hoặc Linux
+- Các thư viện phụ thuộc trong file `requirements.txt`
+
+## Cài đặt và sử dụng
+
+### Phương pháp 1: Chạy từ mã nguồn
+
+1.  Clone hoặc tải xuống dự án:
+    ```bash
+    git clone [https://github.com/your-username/codebase-tracker.git](https://github.com/your-username/codebase-tracker.git)
+    cd codebase-tracker
+    ```
+2.  Cài đặt các thư viện phụ thuộc:
+    ```bash
+    pip install -r requirements.txt
+    ```
+3.  Chạy ứng dụng:
+    ```bash
+    python main.py
+    ```
+
+### Phương pháp 2: Chạy từ file thực thi (.exe)
+
+1.  Tải xuống file .exe từ trang Releases.
+2.  Chạy file `codebase-tracker.exe`.
+
+## Hướng dẫn sử dụng
+
+1.  **Chọn thư mục dự án**:
+    * Kéo và thả thư mục dự án của bạn vào khu vực được chỉ định trong ứng dụng.
+    * Hoặc, nhấn nút "Browse Folder..." để chọn thủ công.
+
+2.  **Quét và tạo tệp tổng hợp**:
+    * Nhấn nút "Scan & Generate" để bắt đầu quá trình quét và gộp file.
+    * Theo dõi tiến trình qua thanh trạng thái và cửa sổ nhật ký.
+
+3.  **Lấy kết quả**:
+    * Sau khi hoàn thành, nhấn **"Copy to Clipboard"** để sao chép toàn bộ nội dung.
+    * Nhấn "Open Output File" để mở tệp `codebase.txt` đã tạo.
+    * Nhấn "Open Output Directory" để mở thư mục `.codebase` chứa tệp kết quả.
+
+4.  **Tùy chỉnh quy tắc bỏ qua**:
+    * Nhấn "Edit .watchignore" để mở và tùy chỉnh các quy tắc bỏ qua bổ sung. Định dạng giống với file `.gitignore`.
+
+## Tệp kết quả
+
+Tệp `codebase.txt` được tạo trong thư mục `.codebase` của dự án và chứa:
+
+- **Header**: Thông tin tổng quan về thời gian tạo, tên dự án, số lượng file.
+- **Cấu trúc dự án**: Sơ đồ cây thư mục của dự án.
+- **Nội dung file text**: Toàn bộ nội dung của các file văn bản, đi kèm đường dẫn tương đối.
+- **Danh sách file nhị phân**: Chỉ liệt kê đường dẫn đến các file nhị phân.
+- **Danh sách mục bỏ qua**: Các thư mục và file bị bỏ qua theo quy tắc.
+
+## Xây dựng file thực thi (.exe)
+
+Để đóng gói ứng dụng thành file .exe cho Windows:
+
+1.  Cài đặt PyInstaller:
+    ```bash
+    pip install pyinstaller
+    ```
+2.  Chạy lệnh build từ thư mục gốc của dự án:
+    ```bash
+    pyinstaller --name "Codebase Tracker" --onefile --windowed --icon=icon.ico --add-data "icon.ico;." main.py
+    ```
+    * `--windowed`: Ẩn cửa sổ dòng lệnh khi chạy ứng dụng.
+    * `--onefile`: Đóng gói thành một file .exe duy nhất.
+    * `--icon`: Đặt icon cho ứng dụng.
+    * Có thể cần thêm `--collect-all tkinterdnd2` nếu PyInstaller không tự tìm thấy thư viện.
+
+3.  File thực thi sẽ được tạo trong thư mục `dist/`.
+
+## Giấy phép
+
+Phần mềm này được phân phối dưới giấy phép MIT. Xem file `LICENSE` để biết thêm chi tiết.
+
+---
+
+Phát triển bởi Minh Long | © 2025 - Codebase Tracker
+
+
+/* ===== requirements.txt ===== */
+chardet==5.2.0
+pathspec==0.11.2
+tkinterdnd2==0.3.0
+
+/* ===== scanner.py ===== */
+import os
+from pathlib import Path
+from ignore_rules import IgnoreRules
+from file_utils import is_text_file, get_relative_path
+
+
+class FileScanner:
+    def __init__(self, project_path):
+        self.project_path = Path(project_path).absolute()
+        self.ignore_rules = IgnoreRules(self.project_path)
+
+    def scan(self, callback=None):
+        text_files = []
+        ignored_items = []
+        all_files = []
+        ignored_dirs = set()
+        total_files_checked = 0
+
+        for root, dirs, files in os.walk(self.project_path, topdown=True):
+            root_path = Path(root)
+            rel_root = get_relative_path(root_path, self.project_path)
+
+            if rel_root == '.':
+                rel_root = ''
+
+            parent_ignored = any(
+                rel_root == ignored_dir or rel_root.startswith(ignored_dir + os.sep)
+                for ignored_dir in ignored_dirs
+            )
+
+            if parent_ignored:
+                dirs[:] = []
+                continue
+
+            if rel_root:
+                all_files.append(rel_root)
+
+            dirs_to_remove = []
+            for d in dirs:
+                dir_path = root_path / d
+                rel_path = get_relative_path(dir_path, self.project_path)
+                all_files.append(rel_path)
+                if self.ignore_rules.is_ignored(rel_path):
+                    ignored_items.append((dir_path, rel_path, "directory"))
+                    ignored_dirs.add(rel_path)
+                    dirs_to_remove.append(d)
+
+            for d in dirs_to_remove:
+                dirs.remove(d)
+
+            for filename in files:
+                file_path = root_path / filename
+                rel_path = get_relative_path(file_path, self.project_path)
+                all_files.append(rel_path)
+                total_files_checked += 1
+                if callback and total_files_checked % 50 == 0:
+                    callback(f"Scanning: {rel_path}", total_files_checked)
+
+                if self.ignore_rules.is_ignored(rel_path):
+                    ignored_items.append((file_path, rel_path, "file"))
+                    continue
+
+                if is_text_file(file_path):
+                    text_files.append((file_path, rel_path))
+                else:
+                    ignored_items.append((file_path, rel_path, "binary"))
+
+        if callback:
+            callback(
+                f"Scan complete! Found {len(text_files)} text files and {len(ignored_items)} ignored items.",
+                total_files_checked)
+
+        return text_files, ignored_items, all_files
+
+
+/* ===== tree_builder.py ===== */
+from pathlib import Path
+import os
+
+
+class TreeBuilder:
+    """Build a tree representation of project structure"""
+
+    def __init__(self):
+        self.indent_symbol = "    "  # 4 spaces
+        self.branch_symbol = "│   "
+        self.tee_symbol = "├── "
+        self.last_symbol = "└── "
+
+    def build_tree(self, project_path, ignored_dirs, all_files, max_depth=None):
+        """
+        Build a tree representation of the project structure.
+
+        Args:
+            project_path: Root path of the project
+            ignored_dirs: Set of directory paths that are ignored
+            all_files: List of all files (both included and ignored)
+            max_depth: Maximum depth to display (None for unlimited)
+
+        Returns:
+            String representation of the tree structure
+        """
+        project_path = Path(project_path).absolute()
+        root_name = project_path.name
+
+        # Start with the root
+        tree_lines = ["."]
+
+        # Build file structure map
+        file_structure = {}
+        ignored_dirs_set = set()
+
+        # Convert ignored_dirs to a set of normalized paths
+        for dir_path in ignored_dirs:
+            # Ensure path is relative to project root
+            if isinstance(dir_path, tuple) and len(dir_path) > 1:
+                rel_path = dir_path[1]
+            else:
+                rel_path = str(dir_path)
+
+            ignored_dirs_set.add(self._normalize_path(rel_path))
+
+        # Add all files to the structure
+        for file_item in all_files:
+            # Handle different formats of file items
+            if isinstance(file_item, tuple) and len(file_item) >= 2:
+                # From ignored_items or text_files/binary_files list
+                abs_path, rel_path = file_item[0], file_item[1]
+                is_dir = os.path.isdir(abs_path) if abs_path else False
+            else:
+                # Direct path object
+                rel_path = file_item
+                is_dir = os.path.isdir(os.path.join(project_path, rel_path))
+
+            # Skip .codebase directory
+            if str(rel_path).startswith('.codebase'):
+                continue
+
+            # Create path components
+            path_parts = self._normalize_path(rel_path).split('/')
+
+            # Build the structure
+            current_dict = file_structure
+            current_path = ""
+
+            for i, part in enumerate(path_parts):
+                if not part:  # Skip empty parts
+                    continue
+
+                # Build the current path for ignore checking
+                if current_path:
+                    current_path += f"/{part}"
+                else:
+                    current_path = part
+
+                # Check if this path or any parent is ignored
+                path_ignored = current_path in ignored_dirs_set or any(
+                    current_path.startswith(ignored_dir + '/')
+                    for ignored_dir in ignored_dirs_set
+                )
+
+                # If it's the last part (file name)
+                if i == len(path_parts) - 1:
+                    # If it's a directory or the final component
+                    if is_dir or i == len(path_parts) - 1:
+                        if part not in current_dict:
+                            current_dict[part] = {"__is_dir__": is_dir, "__ignored__": path_ignored}
+                else:
+                    # It's a directory component
+                    if part not in current_dict:
+                        current_dict[part] = {"__is_dir__": True, "__ignored__": path_ignored}
+                    elif "__is_dir__" not in current_dict[part]:
+                        current_dict[part]["__is_dir__"] = True
+
+                    # Only descend into non-ignored directories
+                    if not current_dict[part].get("__ignored__"):
+                        current_dict = current_dict[part]
+
+        # Recursively build the tree lines
+        self._build_tree_recursive(file_structure, tree_lines, "", 0, max_depth)
+
+        return "\n".join(tree_lines)
+
+    def _build_tree_recursive(self, node, lines, prefix, depth, max_depth):
+        """
+        Recursively build tree lines.
+
+        Args:
+            node: Current node in the file structure
+            lines: List of lines to append to
+            prefix: Current line prefix for indentation
+            depth: Current depth in the tree
+            max_depth: Maximum depth to display
+        """
+        if max_depth is not None and depth > max_depth:
+            return
+
+        # Get all entries except metadata
+        entries = [(k, v) for k, v in node.items() if not k.startswith("__")]
+        entries.sort(key=lambda x: (not x[1].get("__is_dir__", False), x[0].lower()))
+
+        # Process each entry
+        for i, (name, contents) in enumerate(entries):
+            is_last = i == len(entries) - 1
+            is_dir = contents.get("__is_dir__", False)
+            is_ignored = contents.get("__ignored__", False)
+
+            # Add this item
+            if is_last:
+                lines.append(f"{prefix}{self.last_symbol}{name}{'/' if is_dir else ''}")
+                new_prefix = prefix + self.indent_symbol
+            else:
+                lines.append(f"{prefix}{self.tee_symbol}{name}{'/' if is_dir else ''}")
+                new_prefix = prefix + self.branch_symbol
+
+            # If directory and not ignored, add its children
+            if is_dir and not is_ignored:
+                # Only recurse into non-ignored directories with contents
+                filtered_contents = {k: v for k, v in contents.items() if not k.startswith("__")}
+                if filtered_contents:
+                    self._build_tree_recursive(contents, lines, new_prefix, depth + 1, max_depth)
+
+    def _normalize_path(self, path):
+        """Normalize path for consistent processing"""
+        if isinstance(path, Path):
+            path = str(path)
+
+        # Convert backslashes to forward slashes
+        path = path.replace('\\', '/')
+
+        # Remove leading and trailing slashes
+        path = path.strip('/')
+
+        return path
+
+/* ===== ui.py ===== */
+import tkinter as tk
+from tkinter import filedialog, ttk, messagebox
+import threading
+import os
+import platform
+import subprocess
+from pathlib import Path
+from tkinterdnd2 import DND_FILES
+
+from scanner import FileScanner
+from combiner import FileCombiner
+from file_utils import format_file_size
+
+# --- Constants for UI Design ---
+BACKGROUND_COLOR = "#ffffff"
+PRIMARY_COLOR = "#4285F4"
+PRIMARY_LIGHT_COLOR = "#E8F0FE"
+TEXT_COLOR = "#202124"
+TEXT_SECONDARY_COLOR = "#5F6368"
+SUCCESS_COLOR = "#34A853"
+BUTTON_HOVER_COLOR = "#5A95F5"
+BORDER_COLOR = "#DADCE0"
+SOFT_BORDER_COLOR = "#E0E0E0"
+FONT_FAMILY = "Segoe UI"
+FONT_NORMAL = (FONT_FAMILY, 10)
+FONT_BOLD = (FONT_FAMILY, 11, "bold")
+FONT_LARGE_BOLD = (FONT_FAMILY, 16, "bold")
+
+
+class CodebaseTrackerUI:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Codebase Tracker")
+        self.root.geometry("800x600")
+        self.root.minsize(700, 550)
+        self.root.configure(bg=BACKGROUND_COLOR)
+
+        self.project_path = None
+        self.scanner = None
+        self.combiner = None
+        self.output_stats = {}
+
+        self._setup_styles()
+        self._setup_ui()
+
+    def _setup_styles(self):
+        style = ttk.Style(self.root)
+        style.theme_use('clam')
+
+        style.configure("TFrame", background=BACKGROUND_COLOR)
+        style.configure("TLabel", background=BACKGROUND_COLOR, foreground=TEXT_COLOR, font=FONT_NORMAL)
+        style.configure("TLabelframe", background=BACKGROUND_COLOR, bordercolor=SOFT_BORDER_COLOR, relief=tk.SOLID,
+                        borderwidth=1)
+        style.configure("TLabelframe.Label", background=BACKGROUND_COLOR, foreground=TEXT_COLOR, font=FONT_BOLD)
+
+        style.configure("Primary.TButton",
+                        background=PRIMARY_COLOR,
+                        foreground="white",
+                        font=FONT_BOLD,
+                        padding=(20, 12),
+                        borderwidth=0)
+        style.map("Primary.TButton",
+                  background=[('active', BUTTON_HOVER_COLOR)],
+                  foreground=[('active', 'white')])
+
+        style.configure("Secondary.TButton",
+                        background=BACKGROUND_COLOR,
+                        foreground=PRIMARY_COLOR,
+                        font=FONT_BOLD,
+                        padding=(15, 9),
+                        borderwidth=1,
+                        bordercolor=BORDER_COLOR)
+        style.map("Secondary.TButton",
+                  background=[('active', PRIMARY_LIGHT_COLOR)],
+                  bordercolor=[('active', PRIMARY_COLOR)])
+
+        style.configure("Success.TButton",
+                        background=SUCCESS_COLOR,
+                        foreground="white",
+                        font=FONT_BOLD,
+                        padding=(15, 9),
+                        borderwidth=0)
+        style.map("Success.TButton",
+                  background=[('active', '#2E8A47')])
+
+        style.configure("TProgressbar", thickness=5, background=PRIMARY_COLOR, troughcolor=PRIMARY_LIGHT_COLOR)
+
+    def _setup_ui(self):
+        main_frame = ttk.Frame(self.root, padding="20")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        self.drop_zone = ttk.Frame(main_frame, style="TLabelframe", relief=tk.SOLID)
+        self.drop_zone.pack(fill=tk.X, pady=(0, 20))
+        self.drop_zone.pack_propagate(False)
+        self.drop_zone.config(height=120)
+
+        drop_label_large = ttk.Label(self.drop_zone, text="Drag & Drop Project Folder Here", font=FONT_LARGE_BOLD,
+                                     foreground=TEXT_SECONDARY_COLOR)
+        drop_label_large.pack(pady=(20, 5), expand=True)
+
+        browse_frame = ttk.Frame(self.drop_zone)
+        browse_frame.pack(pady=(0, 20), expand=True)
+        ttk.Label(browse_frame, text="or", font=FONT_NORMAL, foreground=TEXT_SECONDARY_COLOR).pack(side=tk.LEFT,
+                                                                                                   padx=10)
+        browse_btn = ttk.Button(browse_frame, text="Browse Folder...", style="Secondary.TButton",
+                                command=self._browse_folder)
+        browse_btn.pack(side=tk.LEFT)
+
+        self.drop_zone.drop_target_register(DND_FILES)
+        self.drop_zone.dnd_bind('<<Drop>>', self._on_drop)
+        self.drop_zone.bind("<Enter>", self._on_drop_enter)
+        self.drop_zone.bind("<Leave>", self._on_drop_leave)
+        for child in self.drop_zone.winfo_children():
+            child.dnd_bind = self.drop_zone.dnd_bind
+            child.drop_target_register = self.drop_zone.drop_target_register
+
+        actions_frame = ttk.Frame(main_frame)
+        actions_frame.pack(fill=tk.X, pady=(0, 20))
+        actions_frame.columnconfigure(0, weight=3)
+        actions_frame.columnconfigure(1, weight=1)
+
+        self.scan_btn = ttk.Button(actions_frame, text="Scan & Generate", style="Primary.TButton",
+                                   command=self._scan_project, state=tk.DISABLED)
+        self.scan_btn.grid(row=0, column=0, sticky="ew")
+
+        self.edit_ignore_btn = ttk.Button(actions_frame, text="Edit .watchignore", style="Secondary.TButton",
+                                          command=self._edit_watchignore, state=tk.DISABLED)
+        self.edit_ignore_btn.grid(row=0, column=1, sticky="ew", padx=(10, 0))
+
+        status_frame = ttk.LabelFrame(main_frame, text="Log", padding="10")
+        status_frame.pack(fill=tk.BOTH, expand=True)
+
+        self.status_var = tk.StringVar(value="Select a project folder to begin.")
+        status_label = ttk.Label(status_frame, textvariable=self.status_var, wraplength=700)
+        status_label.pack(fill=tk.X, pady=(0, 5))
+
+        self.progress_var = tk.DoubleVar()
+        self.progress_bar = ttk.Progressbar(status_frame, variable=self.progress_var, maximum=1.0)
+        self.progress_bar.pack(fill=tk.X, pady=5)
+
+        log_frame = ttk.Frame(status_frame)
+        log_frame.pack(fill=tk.BOTH, expand=True, pady=(5, 0))
+        self.log_text = tk.Text(log_frame, wrap=tk.WORD, height=8, bg="#F8F9FA", fg=TEXT_COLOR, relief=tk.SOLID,
+                                borderwidth=1, font=FONT_NORMAL)
+        self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar = ttk.Scrollbar(log_frame, command=self.log_text.yview)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.log_text.config(yscrollcommand=scrollbar.set)
+
+        self.results_frame = ttk.LabelFrame(main_frame, text="Result", padding="10")
+
+    def _on_drop(self, event):
+        path = event.data.strip('{}')
+        if os.path.isdir(path):
+            self._set_project_path(path)
+            self._scan_project()
+        else:
+            messagebox.showerror("Error", f"Dropped item is not a valid directory: {path}")
+        self._on_drop_leave(event)
+
+    def _on_drop_enter(self, event):
+        self.drop_zone.config(style="Primary.TLabelframe")
+
+    def _on_drop_leave(self, event):
+        self.drop_zone.config(style="TLabelframe")
+
+    def _browse_folder(self):
+        folder_path = filedialog.askdirectory(title="Select Project Folder")
+        if folder_path:
+            self._set_project_path(folder_path)
+
+    def _set_project_path(self, path):
+        self.project_path = path
+        self.path_var_display = os.path.basename(path)
+        self.status_var.set(f"Project: {self.project_path}")
+        self.scan_btn.config(state=tk.NORMAL)
+        self.edit_ignore_btn.config(state=tk.NORMAL)
+        self._log(f"Project selected: {path}")
+
+    def _scan_project(self):
+        if not self.project_path:
+            messagebox.showerror("Error", "Please select a project folder first.")
+            return
+
+        self.scanner = FileScanner(self.project_path)
+        self.combiner = FileCombiner(self.project_path)
+        self.output_stats = {}
+
+        self.log_text.delete(1.0, tk.END)
+        self.progress_var.set(0)
+        self.status_var.set("Starting scan...")
+        self.results_frame.pack_forget()
+        self.scan_btn.config(state=tk.DISABLED)
+
+        self._log(f"Starting to scan project: {self.project_path}")
+
+        thread = threading.Thread(target=self._process_project)
+        thread.daemon = True
+        thread.start()
+
+    def _process_project(self):
+        try:
+            self._update_status("Scanning project files...", 0.1)
+            text_files, ignored_items, all_files = self.scanner.scan(callback=self._scan_callback)
+            self._log(f"Scan complete! Found {len(text_files)} text files.")
+
+            self._update_status("Combining files...", 0.5)
+            success, message, stats = self.combiner.combine(
+                text_files, ignored_items,
+                self.scanner.ignore_rules, all_files,
+                callback=self._combine_callback
+            )
+
+            if success:
+                self.output_stats = stats
+                self._update_status(f"Success! Output file generated.", 1.0)
+                self._log(f"Combined {stats['text_files']} files. Total characters: {stats['total_chars']:,}")
+                self.root.after(0, self._show_results)
+            else:
+                self._update_status(f"Error: {message}", 1.0)
+                self._log(f"Failed to combine files: {message}")
+        except Exception as e:
+            self._update_status(f"An unexpected error occurred: {str(e)}", 1.0)
+            self._log(f"Exception occurred: {str(e)}")
+        finally:
+            self.root.after(0, lambda: self.scan_btn.config(state=tk.NORMAL))
+
+    def _scan_callback(self, message, progress):
+        self._update_status(message, progress * 0.5)
+
+    def _combine_callback(self, message, progress):
+        self._update_status(message, 0.5 + progress * 0.5)
+
+    def _update_status(self, message, progress=None):
+        def update():
+            self.status_var.set(message)
+            if progress is not None:
+                self.progress_var.set(progress)
+            if "Scanning:" in message or "Processing" in message:
+                self._log(message, show_timestamp=False)
+
+        self.root.after(0, update)
+
+    def _log(self, message, show_timestamp=True):
+        def update():
+            if show_timestamp:
+                import time
+                timestamp = time.strftime("%H:%M:%S")
+                self.log_text.insert(tk.END, f"[{timestamp}] {message}\n")
+            else:
+                self.log_text.insert(tk.END, f"{message}\n")
+            self.log_text.see(tk.END)
+
+        self.root.after(0, update)
+
+    def _show_results(self):
+        for widget in self.results_frame.winfo_children():
+            widget.destroy()
+
+        stats = self.output_stats
+
+        info_frame = ttk.Frame(self.results_frame)
+        info_frame.pack(fill=tk.X, pady=(0, 10))
+
+        ttk.Label(info_frame, text=f"Text Files: {stats['text_files']}", font=FONT_BOLD).pack(side=tk.LEFT,
+                                                                                              padx=(0, 15))
+        ttk.Label(info_frame, text=f"Ignored: {stats['ignored_items']}", font=FONT_BOLD).pack(side=tk.LEFT, padx=15)
+        ttk.Label(info_frame, text=f"Total Chars: {stats['total_chars']:,}", font=FONT_BOLD).pack(side=tk.LEFT, padx=15)
+
+        if stats['errors'] > 0:
+            ttk.Label(info_frame, text=f"Errors: {stats['errors']}", font=FONT_BOLD, foreground="red").pack(
+                side=tk.LEFT, padx=15)
+
+        btn_frame = ttk.Frame(self.results_frame)
+        btn_frame.pack(fill=tk.X, pady=(10, 0))
+
+        self.copy_btn = ttk.Button(btn_frame, text="Copy to Clipboard", style="Success.TButton",
+                                   command=self._copy_to_clipboard)
+        self.copy_btn.pack(side=tk.LEFT, padx=(0, 10))
+
+        open_file_btn = ttk.Button(btn_frame, text="Open Output File", style="Secondary.TButton",
+                                   command=self._open_output_file)
+        open_file_btn.pack(side=tk.LEFT, padx=5)
+
+        open_dir_btn = ttk.Button(btn_frame, text="Open Output Directory", style="Secondary.TButton",
+                                  command=self._open_output_dir)
+        open_dir_btn.pack(side=tk.LEFT, padx=5)
+
+        self.results_frame.pack(fill=tk.X, padx=0, pady=(15, 0))
+
+    def _copy_to_clipboard(self):
+        if self.combiner and os.path.exists(self.combiner.output_file):
+            try:
+                with open(self.combiner.output_file, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                self.root.clipboard_clear()
+                self.root.clipboard_append(content)
+                self._log("Content copied to clipboard!")
+
+                original_text = self.copy_btn.cget("text")
+                self.copy_btn.config(text="Copied!", state=tk.DISABLED)
+                self.root.after(2000, lambda: self.copy_btn.config(text=original_text, state=tk.NORMAL))
+            except Exception as e:
+                messagebox.showerror("Error", f"Could not copy to clipboard: {e}")
+                self._log(f"Error copying to clipboard: {e}")
+        else:
+            messagebox.showerror("Error", "Output file not found. Please generate it first.")
+
+    def _open_path(self, path):
+        if not os.path.exists(path):
+            messagebox.showerror("Error", f"Path not found: {path}")
+            return
+        try:
+            if platform.system() == 'Windows':
+                os.startfile(path)
+            elif platform.system() == 'Darwin':
+                subprocess.call(['open', path])
+            else:
+                subprocess.call(['xdg-open', path])
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not open path: {e}")
+
+    def _open_output_file(self):
+        if self.combiner and self.combiner.output_file:
+            self._open_path(self.combiner.output_file)
+
+    def _open_output_dir(self):
+        if self.combiner and self.combiner.output_dir:
+            self._open_path(self.combiner.output_dir)
+
+    def _edit_watchignore(self):
+        if not self.project_path:
+            messagebox.showerror("Error", "Please select a project folder first")
+            return
+
+        if not self.scanner:
+            self.scanner = FileScanner(self.project_path)
+
+        watchignore_path = self.scanner.ignore_rules.get_watchignore_path()
+
+        if not watchignore_path.exists():
+            try:
+                with open(watchignore_path, 'w', encoding='utf-8') as f:
+                    f.write("# Add your custom ignore patterns here\n")
+                    f.write("# Example: *.log\n")
+                self._log(f"Created .watchignore at {watchignore_path}")
+            except Exception as e:
+                messagebox.showerror("Error", f"Could not create .watchignore: {e}")
+                return
+
+        self._open_path(watchignore_path)
+
+
+
+/* ===== IGNORED FILES & DIRECTORIES ===== */
+/* The following items were excluded from the output. */
+
+/* Based on .gitignore patterns: */
+/* build */
+/* dist */
+/* Codebase Tracker.spec */
+
+/* Ignored directories: */
+/* .codebase/ */
+/* .git\hooks/ */
+/* .git\info/ */
+/* .git\logs/ */
+/* .git\objects/ */
+/* .git\refs/ */
+/* .idea\inspectionProfiles/ */
+
+/* Ignored files (by rule): */
+/* .git\HEAD */
+/* .git\config */
+/* .git\description */
+/* .git\index */
+/* .git\packed-refs */
+/* .idea\.gitignore */
+/* .idea\CodebaseTrackerToTxt.iml */
+/* .idea\misc.xml */
+/* .idea\modules.xml */
+/* .idea\vcs.xml */
+/* __pycache__\combiner.cpython-312.pyc */
+/* __pycache__\combiner.cpython-313.pyc */
+/* __pycache__\file_utils.cpython-312.pyc */
+/* __pycache__\file_utils.cpython-313.pyc */
+/* __pycache__\ignore_rules.cpython-312.pyc */
+/* __pycache__\ignore_rules.cpython-313.pyc */
+/* __pycache__\scanner.cpython-312.pyc */
+/* __pycache__\scanner.cpython-313.pyc */
+/* __pycache__\tree_builder.cpython-312.pyc */
+/* __pycache__\tree_builder.cpython-313.pyc */
+/* __pycache__\ui.cpython-312.pyc */
+/* __pycache__\ui.cpython-313.pyc */
+
+/* Ignored binary files: */
+/* icon.ico */
