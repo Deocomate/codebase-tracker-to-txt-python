@@ -1,8 +1,8 @@
 /* ==========================================================
-   CODEBASE SNAPSHOT - 2025-06-15 16:07:56
-   Project: CodebaseTrackerToTxt
-   Text Files Included: 10
-   Items Ignored: 30
+   CODEBASE SNAPSHOT - 2025-07-06 14:52:33
+   Project: codebase-tracker-to-txt
+   Text Files Included: 11
+   Items Ignored: 36
    ========================================================== */
 
 /* PROJECT STRUCTURE
@@ -14,6 +14,7 @@
    │   ├── logs/
    │   ├── objects/
    │   ├── refs/
+   │   ├── COMMIT_EDITMSG
    │   ├── config
    │   ├── description
    │   ├── HEAD
@@ -25,13 +26,20 @@
    │   ├── CodebaseTrackerToTxt.iml
    │   ├── misc.xml
    │   ├── modules.xml
-   │   └── vcs.xml
+   │   ├── vcs.xml
+   │   └── workspace.xml
+   ├── build/
+   │   └── Codebase Tracker/
+   ├── dist/
+   │   └── Codebase Tracker.exe
    ├── .gitignore
+   ├── Codebase Tracker.spec
    ├── combiner.py
    ├── file_utils.py
    ├── icon.ico
    ├── ignore_rules.py
    ├── main.py
+   ├── processor.py
    ├── README.MD
    ├── requirements.txt
    ├── scanner.py
@@ -40,9 +48,21 @@
    ------------------------------------------------------------ */
 
 /* ===== .gitignore ===== */
-build
-dist
+# Python
+__pycache__/
+*.pyc
+
+# Build artifacts
+build/
+dist/
 Codebase Tracker.spec
+
+# Tool output
+.codebase/
+
+# IDE
+.idea/
+
 
 /* ===== combiner.py ===== */
 import os
@@ -61,7 +81,7 @@ class FileCombiner:
 
         ensure_directory(self.output_dir)
 
-    def combine(self, text_files, ignored_items, ignore_rules, all_files=None, callback=None):
+    def combine(self, text_files, ignored_items, ignore_rules, all_files=None, callback=None, cancel_event=None):
         try:
             total_text_files = len(text_files)
             ignored_count = len(ignored_items)
@@ -97,24 +117,32 @@ class FileCombiner:
                     total_chars += len(formatted_tree)
 
                 for absolute_path, relative_path in text_files:
+                    if cancel_event and cancel_event.is_set():
+                        if callback:
+                            callback("Combine process cancelled.", -1)
+                        break
+
                     files_processed += 1
                     if callback:
                         callback(f"Processing ({files_processed}/{total_text_files}): {relative_path}",
-                                 files_processed / total_text_files)
+                                 0.5 + (files_processed / total_text_files) * 0.5)
 
                     try:
                         with open(absolute_path, 'r', encoding='utf-8', errors='replace') as infile:
                             content = infile.read()
-                            file_header = f"/* ===== {relative_path} ===== */\n"
-                            outfile.write(file_header)
-                            outfile.write(content)
-                            outfile.write("\n\n")
-                            total_chars += len(file_header) + len(content) + 2
+                        file_header = f"/* ===== {relative_path} ===== */\n"
+                        outfile.write(file_header)
+                        outfile.write(content)
+                        outfile.write("\n\n")
+                        total_chars += len(file_header) + len(content) + 2
                     except Exception as e:
                         error_count += 1
                         error_msg = f"/* ===== ERROR: Could not read file: {relative_path} ===== */\n/* {str(e)} */\n\n"
                         outfile.write(error_msg)
                         total_chars += len(error_msg)
+                
+                if cancel_event and cancel_event.is_set():
+                    return False, "Process cancelled by user.", {}
 
                 if ignored_items:
                     rule_summary = ignore_rules.get_rule_summary()
@@ -127,21 +155,19 @@ class FileCombiner:
                             ignore_section += f"/* {pattern} */\n"
                         ignore_section += "\n"
 
-                    if rule_summary['watchignore']['found'] and rule_summary['watchignore']['patterns']:
-                        ignore_section += "/* Based on .watchignore patterns: */\n"
-                        for pattern in rule_summary['watchignore']['patterns']:
+                    # --- UPDATED: Check for 'track_ignore' instead of 'watchignore' ---
+                    if rule_summary['track_ignore']['found'] and rule_summary['track_ignore']['patterns']:
+                        ignore_section += f"/* Based on {ignore_rules.get_track_ignore_path().name} patterns: */\n"
+                        for pattern in rule_summary['track_ignore']['patterns']:
                             ignore_section += f"/* {pattern} */\n"
                         ignore_section += "\n"
 
                     outfile.write(ignore_section)
                     total_chars += len(ignore_section)
 
-                    ignored_dirs = sorted([item for item in ignored_items if item[2] == "directory"],
-                                          key=lambda x: x[1])
-                    ignored_files_by_rule = sorted([item for item in ignored_items if item[2] == "file"],
-                                                   key=lambda x: x[1])
-                    ignored_binary_files = sorted([item for item in ignored_items if item[2] == "binary"],
-                                                  key=lambda x: x[1])
+                    ignored_dirs = sorted([item for item in ignored_items if item[2] == "directory"], key=lambda x: x[1])
+                    ignored_files_by_rule = sorted([item for item in ignored_items if item[2] == "file"], key=lambda x: x[1])
+                    ignored_binary_files = sorted([item for item in ignored_items if item[2] == "binary"], key=lambda x: x[1])
 
                     if ignored_dirs:
                         outfile.write("/* Ignored directories: */\n")
@@ -176,7 +202,7 @@ class FileCombiner:
             }
 
             if callback:
-                callback(f"Done! Combined {total_text_files} text files into {self.output_file}", 1.0)
+                callback(f"Done! Combined {total_text_files} text files into {self.output_file.name}", 1.0)
 
             return True, f"Successfully combined {total_text_files} text files.", stats
 
@@ -190,7 +216,6 @@ class FileCombiner:
 /* ===== file_utils.py ===== */
 import os
 import mimetypes
-import chardet
 from pathlib import Path
 
 # Common binary file extensions
@@ -254,25 +279,29 @@ def is_text_file(file_path):
                 mime_type.startswith('video/') or mime_type.startswith('font/')):
             return False
 
-    # For files without extension or unknown MIME type, try to detect encoding
+    # === PERFORMANCE OPTIMIZATION: Replaced chardet with a faster null-byte check ===
     try:
-        if file_path.stat().st_size > 1024 * 1024:  # Skip files larger than 1MB
-            return False
-
-        # Read a sample of the file to detect encoding
+        # For files without extension or unknown MIME type, use a fast heuristic.
+        # Check for NULL bytes in the first few KB, which is a strong indicator of a binary file.
         with open(file_path, 'rb') as f:
-            sample = f.read(4096)  # Read first 4KB
-            if not sample:
+            chunk = f.read(4096)  # Read first 4KB
+            if not chunk:
                 return True  # Empty file is considered text
 
-            # Try to detect the encoding
-            result = chardet.detect(sample)
-            return result['encoding'] is not None and result['confidence'] > 0.7
+            # If a NULL byte is found, it's almost certainly a binary file.
+            if b'\0' in chunk:
+                return False
+        
+        # If no NULL bytes, it's likely a text file.
+        # We can still attempt to decode as UTF-8 as a final check.
+        try:
+            chunk.decode('utf-8')
+            return True
+        except UnicodeDecodeError:
+            return False  # Contains non-UTF8 characters, treat as binary.
+
     except (IOError, OSError):
         return False
-
-    # Default to non-text if we couldn't determine
-    return False
 
 
 def format_file_size(size_bytes):
@@ -301,7 +330,6 @@ def get_relative_path(file_path, base_path):
     """Get the path of a file relative to the base path"""
     return os.path.relpath(file_path, base_path)
 
-
 /* ===== ignore_rules.py ===== */
 import os
 import pathspec
@@ -316,6 +344,11 @@ DEFAULT_IGNORE_PATTERNS = [
     '*.lockb', '*.log', '*.tmp', '*.bak', '*.swp', '*.DS_Store'
 ]
 
+# --- NEW: Constants for the custom ignore file ---
+TRACK_IGNORE_FILENAME = "track_ignore.txt"
+TRACK_IGNORE_HEADER = "# File này giúp bạn bỏ qua (ignore) các file và thư mục không cần thiết khỏi quá trình quét codebase của bạn (Cú pháp tương tự như .gitignore). Bạn có thể bỏ qua code của thư viện, file nhị phân, folder không cần thiết để codebase nhẹ hơn."
+TRACK_IGNORE_EXAMPLE = "# Ví dụ: build/\n# Ví dụ: *.log\n"
+
 
 class IgnoreRules:
     def __init__(self, project_path):
@@ -323,21 +356,18 @@ class IgnoreRules:
         self.codebase_dir = self.project_path / '.codebase'
         self.rules = []
         self.gitignore_found = False
-        self.watchignore_found = False
-
-        # Store individual pattern sources for reporting
+        
+        # --- UPDATED: Renamed variables for clarity ---
+        self.track_ignore_found = False
         self.gitignore_patterns = []
-        self.watchignore_patterns = []
+        self.track_ignore_patterns = []
         self.default_patterns = DEFAULT_IGNORE_PATTERNS.copy()
 
-        # Ensure .codebase directory exists
         ensure_directory(self.codebase_dir)
 
-        # Load rules
         self._load_gitignore()
-        self._load_watchignore()
-
-        # Add default patterns
+        # --- UPDATED: Call the new method ---
+        self._load_track_ignore()
         self._add_default_patterns()
 
     def _load_gitignore(self):
@@ -347,47 +377,51 @@ class IgnoreRules:
             try:
                 with open(gitignore_path, 'r', encoding='utf-8') as f:
                     gitignore_content = f.read()
-                    gitignore_lines = gitignore_content.splitlines()
-                    # Store raw patterns
-                    self.gitignore_patterns = [line for line in gitignore_lines if
-                                               line.strip() and not line.strip().startswith('#')]
-                    # Create pathspec rule
-                    self.rules.append(pathspec.PathSpec.from_lines('gitwildmatch', gitignore_lines))
+                gitignore_lines = gitignore_content.splitlines()
+                self.gitignore_patterns = [line for line in gitignore_lines if line.strip() and not line.strip().startswith('#')]
+                self.rules.append(pathspec.PathSpec.from_lines('gitwildmatch', gitignore_lines))
                 self.gitignore_found = True
-                print(f"Loaded .gitignore rules from {gitignore_path}")
             except Exception as e:
                 print(f"Error loading .gitignore: {e}")
 
-    def _load_watchignore(self):
-        """Load rules from .watchignore file in .codebase directory or create it if it doesn't exist"""
-        # New location in .codebase directory
-        watchignore_path = self.codebase_dir / '.watchignore'
+    def _load_track_ignore(self):
+        """
+        Load rules from track_ignore.txt.
+        If it doesn't exist, create it with a helpful header.
+        If it exists, ensure the header is present.
+        """
+        track_ignore_path = self.get_track_ignore_path()
+        
+        try:
+            if track_ignore_path.exists() and track_ignore_path.is_file():
+                with open(track_ignore_path, 'r+', encoding='utf-8') as f:
+                    lines = f.readlines()
+                    # Ensure header exists
+                    if not lines or lines[0].strip() != TRACK_IGNORE_HEADER:
+                        content = f.read()
+                        f.seek(0, 0)
+                        f.write(TRACK_IGNORE_HEADER + '\n\n' + content)
+                        lines.insert(0, TRACK_IGNORE_HEADER + '\n')
 
-        if watchignore_path.exists() and watchignore_path.is_file():
-            try:
-                with open(watchignore_path, 'r', encoding='utf-8') as f:
-                    watchignore_content = f.read()
-                    watchignore_lines = watchignore_content.splitlines()
-                    # Store raw patterns
-                    self.watchignore_patterns = [line for line in watchignore_lines if
-                                                 line.strip() and not line.strip().startswith('#')]
-                    # Create pathspec rule
-                    self.rules.append(pathspec.PathSpec.from_lines('gitwildmatch', watchignore_lines))
-                self.watchignore_found = True
-                print(f"Loaded .watchignore rules from {watchignore_path}")
-            except Exception as e:
-                print(f"Error loading .watchignore: {e}")
-        else:
-            # Create .watchignore file in .codebase directory
-            try:
-                with open(watchignore_path, 'w', encoding='utf-8') as f:
-                    f.write("# Add your custom ignore patterns here\n")
-                    f.write("# Example: *.log\n")
-                    f.write("# Example: temp/\n")
-                print(f"Created new .watchignore file at {watchignore_path}")
-                self.watchignore_patterns = []
-            except Exception as e:
-                print(f"Error creating .watchignore: {e}")
+                # Filter out header and comments to get actual patterns
+                user_patterns = [
+                    line.strip() for line in lines 
+                    if line.strip() and not line.strip().startswith('#')
+                ]
+                if user_patterns:
+                    self.track_ignore_patterns = user_patterns
+                    self.rules.append(pathspec.PathSpec.from_lines('gitwildmatch', self.track_ignore_patterns))
+                self.track_ignore_found = True
+            else:
+                # Create the file with header and examples
+                with open(track_ignore_path, 'w', encoding='utf-8') as f:
+                    f.write(TRACK_IGNORE_HEADER + '\n\n')
+                    f.write(TRACK_IGNORE_EXAMPLE)
+                self.track_ignore_patterns = [] # No user patterns yet
+                self.track_ignore_found = True # File is now "found"
+        except Exception as e:
+            print(f"Error loading or creating {TRACK_IGNORE_FILENAME}: {e}")
+
 
     def _add_default_patterns(self):
         """Add default ignore patterns"""
@@ -398,19 +432,15 @@ class IgnoreRules:
         Check if a path should be ignored based on rules.
         Returns True if the path should be ignored.
         """
-        # Convert to string path relative to project root
         if isinstance(path, Path):
             rel_path = path.relative_to(self.project_path) if path.is_absolute() else path
-            path_str = str(rel_path)
+            path_str = str(rel_path).replace('\\', '/')
         else:
-            # If path is already relative to project root as string
-            path_str = path
+            path_str = path.replace('\\', '/')
 
-        # Always ignore the .codebase directory itself
         if path_str == '.codebase' or path_str.startswith('.codebase/'):
             return True
 
-        # Check against all rule sets
         for rule_set in self.rules:
             if rule_set.match_file(path_str):
                 return True
@@ -419,14 +449,15 @@ class IgnoreRules:
 
     def get_rule_summary(self):
         """Get a summary of all ignore rules for reporting"""
+        # --- UPDATED: Use the new key 'track_ignore' ---
         rules_info = {
             'gitignore': {
                 'found': self.gitignore_found,
                 'patterns': self.gitignore_patterns
             },
-            'watchignore': {
-                'found': self.watchignore_found,
-                'patterns': self.watchignore_patterns
+            'track_ignore': {
+                'found': self.track_ignore_found,
+                'patterns': self.track_ignore_patterns
             },
             'default': {
                 'patterns': self.default_patterns
@@ -434,9 +465,10 @@ class IgnoreRules:
         }
         return rules_info
 
-    def get_watchignore_path(self):
-        """Return the path to the .watchignore file"""
-        return self.codebase_dir / '.watchignore'
+    def get_track_ignore_path(self):
+        """Return the path to the track_ignore.txt file"""
+        # --- UPDATED: Use the new filename constant ---
+        return self.codebase_dir / TRACK_IGNORE_FILENAME
 
 
 /* ===== main.py ===== */
@@ -468,6 +500,58 @@ def main():
 if __name__ == "__main__":
     main()
 
+
+/* ===== processor.py ===== */
+import threading
+from scanner import FileScanner
+from combiner import FileCombiner
+
+
+class ProjectProcessor:
+    """
+    Acts as a controller/facade to orchestrate the scanning and combining process.
+    This decouples the business logic from the UI.
+    """
+    def __init__(self, project_path):
+        self.project_path = project_path
+        self.scanner = FileScanner(project_path)
+        self.combiner = FileCombiner(project_path)
+
+    def run(self, scan_callback, combine_callback, cancel_event: threading.Event):
+        """
+        Runs the full scan and combine process.
+        Accepts callbacks for UI updates and a cancel_event for interruption.
+        Returns (was_successful, message, stats)
+        """
+        try:
+            # --- Scanning phase ---
+            scan_callback("Scanning project files...", 0)
+            text_files, ignored_items, all_files = self.scanner.scan(
+                callback=scan_callback,
+                cancel_event=cancel_event
+            )
+
+            if cancel_event.is_set():
+                return False, "Process was cancelled by user.", {}
+
+            scan_callback(f"Scan complete! Found {len(text_files)} text files.", 0.5)
+
+            # --- Combining phase ---
+            combine_callback("Combining files...", 0.5)
+            success, message, stats = self.combiner.combine(
+                text_files, ignored_items,
+                self.scanner.ignore_rules, all_files,
+                callback=combine_callback,
+                cancel_event=cancel_event
+            )
+
+            if cancel_event.is_set():
+                return False, "Process was cancelled by user.", {}
+
+            return success, message, stats
+
+        except Exception as e:
+            return False, f"An unexpected error occurred: {str(e)}", {}
 
 /* ===== README.MD ===== */
 # Codebase Tracker
@@ -588,8 +672,8 @@ Phát triển bởi Minh Long | © 2025 - Codebase Tracker
 
 /* ===== requirements.txt ===== */
 chardet==5.2.0
-pathspec==0.11.2
-tkinterdnd2==0.3.0
+pathspec==0.12.1
+tkinterdnd2==0.4.3
 
 /* ===== scanner.py ===== */
 import os
@@ -603,7 +687,7 @@ class FileScanner:
         self.project_path = Path(project_path).absolute()
         self.ignore_rules = IgnoreRules(self.project_path)
 
-    def scan(self, callback=None):
+    def scan(self, callback=None, cancel_event=None):
         text_files = []
         ignored_items = []
         all_files = []
@@ -611,6 +695,12 @@ class FileScanner:
         total_files_checked = 0
 
         for root, dirs, files in os.walk(self.project_path, topdown=True):
+            # === UX IMPROVEMENT: Allow cancellation ===
+            if cancel_event and cancel_event.is_set():
+                if callback:
+                    callback("Scan cancelled by user.", -1)
+                break
+
             root_path = Path(root)
             rel_root = get_relative_path(root_path, self.project_path)
 
@@ -643,12 +733,16 @@ class FileScanner:
                 dirs.remove(d)
 
             for filename in files:
+                # === UX IMPROVEMENT: Allow cancellation ===
+                if cancel_event and cancel_event.is_set():
+                    break
+                
                 file_path = root_path / filename
                 rel_path = get_relative_path(file_path, self.project_path)
                 all_files.append(rel_path)
                 total_files_checked += 1
                 if callback and total_files_checked % 50 == 0:
-                    callback(f"Scanning: {rel_path}", total_files_checked)
+                    callback(f"Scanning: {rel_path}", -1) # Use -1 progress for indeterminate updates
 
                 if self.ignore_rules.is_ignored(rel_path):
                     ignored_items.append((file_path, rel_path, "file"))
@@ -658,14 +752,15 @@ class FileScanner:
                     text_files.append((file_path, rel_path))
                 else:
                     ignored_items.append((file_path, rel_path, "binary"))
+            
+            if cancel_event and cancel_event.is_set():
+                break
 
-        if callback:
+        if callback and not (cancel_event and cancel_event.is_set()):
             callback(
-                f"Scan complete! Found {len(text_files)} text files and {len(ignored_items)} ignored items.",
-                total_files_checked)
+                f"Scan complete! Found {len(text_files)} text files and {len(ignored_items)} ignored items.", -1)
 
         return text_files, ignored_items, all_files
-
 
 /* ===== tree_builder.py ===== */
 from pathlib import Path
@@ -837,14 +932,16 @@ import subprocess
 from pathlib import Path
 from tkinterdnd2 import DND_FILES
 
-from scanner import FileScanner
-from combiner import FileCombiner
+from processor import ProjectProcessor
 from file_utils import format_file_size
+from scanner import FileScanner
 
 # --- Constants for UI Design ---
 BACKGROUND_COLOR = "#ffffff"
 PRIMARY_COLOR = "#4285F4"
 PRIMARY_LIGHT_COLOR = "#E8F0FE"
+CANCEL_COLOR = "#D93025"
+CANCEL_HOVER_COLOR = "#E84C3D"
 TEXT_COLOR = "#202124"
 TEXT_SECONDARY_COLOR = "#5F6368"
 SUCCESS_COLOR = "#34A853"
@@ -866,9 +963,11 @@ class CodebaseTrackerUI:
         self.root.configure(bg=BACKGROUND_COLOR)
 
         self.project_path = None
-        self.scanner = None
-        self.combiner = None
+        self.processor = None
         self.output_stats = {}
+        
+        self.cancel_event = threading.Event()
+        self.worker_thread = None
 
         self._setup_styles()
         self._setup_ui()
@@ -883,35 +982,17 @@ class CodebaseTrackerUI:
                         borderwidth=1)
         style.configure("TLabelframe.Label", background=BACKGROUND_COLOR, foreground=TEXT_COLOR, font=FONT_BOLD)
 
-        style.configure("Primary.TButton",
-                        background=PRIMARY_COLOR,
-                        foreground="white",
-                        font=FONT_BOLD,
-                        padding=(20, 12),
-                        borderwidth=0)
-        style.map("Primary.TButton",
-                  background=[('active', BUTTON_HOVER_COLOR)],
-                  foreground=[('active', 'white')])
+        style.configure("Primary.TButton", background=PRIMARY_COLOR, foreground="white", font=FONT_BOLD, padding=(20, 12), borderwidth=0)
+        style.map("Primary.TButton", background=[('active', BUTTON_HOVER_COLOR), ('disabled', '#A0C3FF')], foreground=[('active', 'white')])
 
-        style.configure("Secondary.TButton",
-                        background=BACKGROUND_COLOR,
-                        foreground=PRIMARY_COLOR,
-                        font=FONT_BOLD,
-                        padding=(15, 9),
-                        borderwidth=1,
-                        bordercolor=BORDER_COLOR)
-        style.map("Secondary.TButton",
-                  background=[('active', PRIMARY_LIGHT_COLOR)],
-                  bordercolor=[('active', PRIMARY_COLOR)])
+        style.configure("Secondary.TButton", background=BACKGROUND_COLOR, foreground=PRIMARY_COLOR, font=FONT_BOLD, padding=(15, 9), borderwidth=1, bordercolor=BORDER_COLOR)
+        style.map("Secondary.TButton", background=[('active', PRIMARY_LIGHT_COLOR)], bordercolor=[('active', PRIMARY_COLOR)])
 
-        style.configure("Success.TButton",
-                        background=SUCCESS_COLOR,
-                        foreground="white",
-                        font=FONT_BOLD,
-                        padding=(15, 9),
-                        borderwidth=0)
-        style.map("Success.TButton",
-                  background=[('active', '#2E8A47')])
+        style.configure("Success.TButton", background=SUCCESS_COLOR, foreground="white", font=FONT_BOLD, padding=(15, 9), borderwidth=0)
+        style.map("Success.TButton", background=[('active', '#2E8A47')])
+        
+        style.configure("Cancel.TButton", background=CANCEL_COLOR, foreground="white", font=FONT_BOLD, padding=(20, 12), borderwidth=0)
+        style.map("Cancel.TButton", background=[('active', CANCEL_HOVER_COLOR)])
 
         style.configure("TProgressbar", thickness=5, background=PRIMARY_COLOR, troughcolor=PRIMARY_LIGHT_COLOR)
 
@@ -924,37 +1005,30 @@ class CodebaseTrackerUI:
         self.drop_zone.pack_propagate(False)
         self.drop_zone.config(height=120)
 
-        drop_label_large = ttk.Label(self.drop_zone, text="Drag & Drop Project Folder Here", font=FONT_LARGE_BOLD,
-                                     foreground=TEXT_SECONDARY_COLOR)
+        drop_label_large = ttk.Label(self.drop_zone, text="Drag & Drop Project Folder Here", font=FONT_LARGE_BOLD, foreground=TEXT_SECONDARY_COLOR)
         drop_label_large.pack(pady=(20, 5), expand=True)
 
         browse_frame = ttk.Frame(self.drop_zone)
         browse_frame.pack(pady=(0, 20), expand=True)
-        ttk.Label(browse_frame, text="or", font=FONT_NORMAL, foreground=TEXT_SECONDARY_COLOR).pack(side=tk.LEFT,
-                                                                                                   padx=10)
-        browse_btn = ttk.Button(browse_frame, text="Browse Folder...", style="Secondary.TButton",
-                                command=self._browse_folder)
+        ttk.Label(browse_frame, text="or", font=FONT_NORMAL, foreground=TEXT_SECONDARY_COLOR).pack(side=tk.LEFT, padx=10)
+        browse_btn = ttk.Button(browse_frame, text="Browse Folder...", style="Secondary.TButton", command=self._browse_folder)
         browse_btn.pack(side=tk.LEFT)
 
         self.drop_zone.drop_target_register(DND_FILES)
         self.drop_zone.dnd_bind('<<Drop>>', self._on_drop)
-        self.drop_zone.bind("<Enter>", self._on_drop_enter)
-        self.drop_zone.bind("<Leave>", self._on_drop_leave)
-        for child in self.drop_zone.winfo_children():
-            child.dnd_bind = self.drop_zone.dnd_bind
-            child.drop_target_register = self.drop_zone.drop_target_register
 
         actions_frame = ttk.Frame(main_frame)
         actions_frame.pack(fill=tk.X, pady=(0, 20))
         actions_frame.columnconfigure(0, weight=3)
         actions_frame.columnconfigure(1, weight=1)
 
-        self.scan_btn = ttk.Button(actions_frame, text="Scan & Generate", style="Primary.TButton",
-                                   command=self._scan_project, state=tk.DISABLED)
+        self.scan_btn = ttk.Button(actions_frame, text="Scan & Generate", style="Primary.TButton", command=self._scan_project, state=tk.DISABLED)
         self.scan_btn.grid(row=0, column=0, sticky="ew")
 
-        self.edit_ignore_btn = ttk.Button(actions_frame, text="Edit .watchignore", style="Secondary.TButton",
-                                          command=self._edit_watchignore, state=tk.DISABLED)
+        self.cancel_btn = ttk.Button(actions_frame, text="Cancel", style="Cancel.TButton", command=self._on_cancel)
+        
+        # --- UPDATED: Changed button text and command ---
+        self.edit_ignore_btn = ttk.Button(actions_frame, text="Edit track_ignore.txt", style="Secondary.TButton", command=self._edit_track_ignore, state=tk.DISABLED)
         self.edit_ignore_btn.grid(row=0, column=1, sticky="ew", padx=(10, 0))
 
         status_frame = ttk.LabelFrame(main_frame, text="Log", padding="10")
@@ -970,8 +1044,7 @@ class CodebaseTrackerUI:
 
         log_frame = ttk.Frame(status_frame)
         log_frame.pack(fill=tk.BOTH, expand=True, pady=(5, 0))
-        self.log_text = tk.Text(log_frame, wrap=tk.WORD, height=8, bg="#F8F9FA", fg=TEXT_COLOR, relief=tk.SOLID,
-                                borderwidth=1, font=FONT_NORMAL)
+        self.log_text = tk.Text(log_frame, wrap=tk.WORD, height=8, bg="#F8F9FA", fg=TEXT_COLOR, relief=tk.SOLID, borderwidth=1, font=FONT_NORMAL)
         self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar = ttk.Scrollbar(log_frame, command=self.log_text.yview)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
@@ -983,16 +1056,8 @@ class CodebaseTrackerUI:
         path = event.data.strip('{}')
         if os.path.isdir(path):
             self._set_project_path(path)
-            self._scan_project()
         else:
             messagebox.showerror("Error", f"Dropped item is not a valid directory: {path}")
-        self._on_drop_leave(event)
-
-    def _on_drop_enter(self, event):
-        self.drop_zone.config(style="Primary.TLabelframe")
-
-    def _on_drop_leave(self, event):
-        self.drop_zone.config(style="TLabelframe")
 
     def _browse_folder(self):
         folder_path = filedialog.askdirectory(title="Select Project Folder")
@@ -1001,71 +1066,93 @@ class CodebaseTrackerUI:
 
     def _set_project_path(self, path):
         self.project_path = path
-        self.path_var_display = os.path.basename(path)
-        self.status_var.set(f"Project: {self.project_path}")
+        for widget in self.drop_zone.winfo_children():
+            widget.destroy()
+        path_label = ttk.Label(self.drop_zone, text=f"Project: {path}", font=FONT_BOLD, wraplength=750)
+        path_label.pack(pady=40, padx=20, expand=True)
+
+        self.status_var.set(f"Project selected. Ready to scan.")
         self.scan_btn.config(state=tk.NORMAL)
         self.edit_ignore_btn.config(state=tk.NORMAL)
         self._log(f"Project selected: {path}")
+
+    def _on_cancel(self):
+        if self.worker_thread and self.worker_thread.is_alive():
+            self._log("Cancellation requested by user...")
+            self.cancel_event.set()
+            self.cancel_btn.config(state=tk.DISABLED, text="Cancelling...")
 
     def _scan_project(self):
         if not self.project_path:
             messagebox.showerror("Error", "Please select a project folder first.")
             return
 
-        self.scanner = FileScanner(self.project_path)
-        self.combiner = FileCombiner(self.project_path)
+        self.processor = ProjectProcessor(self.project_path)
         self.output_stats = {}
+        self.cancel_event.clear()
 
         self.log_text.delete(1.0, tk.END)
         self.progress_var.set(0)
         self.status_var.set("Starting scan...")
         self.results_frame.pack_forget()
-        self.scan_btn.config(state=tk.DISABLED)
+        
+        self.scan_btn.grid_remove()
+        self.cancel_btn.grid(row=0, column=0, sticky="ew")
+        self.cancel_btn.config(state=tk.NORMAL, text="Cancel")
+        self.edit_ignore_btn.config(state=tk.DISABLED)
 
         self._log(f"Starting to scan project: {self.project_path}")
 
-        thread = threading.Thread(target=self._process_project)
-        thread.daemon = True
-        thread.start()
+        self.worker_thread = threading.Thread(target=self._process_project)
+        self.worker_thread.daemon = True
+        self.worker_thread.start()
 
     def _process_project(self):
-        try:
-            self._update_status("Scanning project files...", 0.1)
-            text_files, ignored_items, all_files = self.scanner.scan(callback=self._scan_callback)
-            self._log(f"Scan complete! Found {len(text_files)} text files.")
+        if not self.processor:
+            self._log("Error: Processor not initialized. Aborting.")
+            self.root.after(0, self._restore_ui_state)
+            return
 
-            self._update_status("Combining files...", 0.5)
-            success, message, stats = self.combiner.combine(
-                text_files, ignored_items,
-                self.scanner.ignore_rules, all_files,
-                callback=self._combine_callback
+        try:
+            success, message, stats = self.processor.run(
+                self._scan_callback, self._combine_callback, self.cancel_event
             )
+            
+            if self.cancel_event.is_set():
+                self._update_status("Process cancelled.", 0)
+                self._log("The operation was successfully cancelled.")
+                return
 
             if success:
                 self.output_stats = stats
-                self._update_status(f"Success! Output file generated.", 1.0)
-                self._log(f"Combined {stats['text_files']} files. Total characters: {stats['total_chars']:,}")
+                self._update_status("Success! Output file generated.", 1.0)
+                self._log(f"Combined {stats.get('text_files', 0)} files. Total characters: {stats.get('total_chars', 0):,}")
                 self.root.after(0, self._show_results)
             else:
                 self._update_status(f"Error: {message}", 1.0)
-                self._log(f"Failed to combine files: {message}")
-        except Exception as e:
-            self._update_status(f"An unexpected error occurred: {str(e)}", 1.0)
-            self._log(f"Exception occurred: {str(e)}")
+                self._log(f"Failed to complete process: {message}")
+                messagebox.showerror("Error", f"An error occurred: {message}")
         finally:
-            self.root.after(0, lambda: self.scan_btn.config(state=tk.NORMAL))
+            self.root.after(0, self._restore_ui_state)
+
+    def _restore_ui_state(self):
+        self.cancel_btn.grid_remove()
+        self.scan_btn.grid(row=0, column=0, sticky="ew")
+        self.scan_btn.config(state=tk.NORMAL)
+        self.edit_ignore_btn.config(state=tk.NORMAL)
 
     def _scan_callback(self, message, progress):
-        self._update_status(message, progress * 0.5)
+        self._update_status(message, -1)
 
     def _combine_callback(self, message, progress):
-        self._update_status(message, 0.5 + progress * 0.5)
+        self._update_status(message, progress)
 
     def _update_status(self, message, progress=None):
         def update():
             self.status_var.set(message)
-            if progress is not None:
+            if progress is not None and progress >= 0:
                 self.progress_var.set(progress)
+            
             if "Scanning:" in message or "Processing" in message:
                 self._log(message, show_timestamp=False)
 
@@ -1080,7 +1167,6 @@ class CodebaseTrackerUI:
             else:
                 self.log_text.insert(tk.END, f"{message}\n")
             self.log_text.see(tk.END)
-
         self.root.after(0, update)
 
     def _show_results(self):
@@ -1088,59 +1174,52 @@ class CodebaseTrackerUI:
             widget.destroy()
 
         stats = self.output_stats
+        if not stats: return
 
         info_frame = ttk.Frame(self.results_frame)
         info_frame.pack(fill=tk.X, pady=(0, 10))
 
-        ttk.Label(info_frame, text=f"Text Files: {stats['text_files']}", font=FONT_BOLD).pack(side=tk.LEFT,
-                                                                                              padx=(0, 15))
-        ttk.Label(info_frame, text=f"Ignored: {stats['ignored_items']}", font=FONT_BOLD).pack(side=tk.LEFT, padx=15)
-        ttk.Label(info_frame, text=f"Total Chars: {stats['total_chars']:,}", font=FONT_BOLD).pack(side=tk.LEFT, padx=15)
-
-        if stats['errors'] > 0:
-            ttk.Label(info_frame, text=f"Errors: {stats['errors']}", font=FONT_BOLD, foreground="red").pack(
-                side=tk.LEFT, padx=15)
+        ttk.Label(info_frame, text=f"Text Files: {stats.get('text_files', 0)}", font=FONT_BOLD).pack(side=tk.LEFT, padx=(0, 15))
+        ttk.Label(info_frame, text=f"Ignored: {stats.get('ignored_items', 0)}", font=FONT_BOLD).pack(side=tk.LEFT, padx=15)
+        ttk.Label(info_frame, text=f"Total Chars: {stats.get('total_chars', 0):,}", font=FONT_BOLD).pack(side=tk.LEFT, padx=15)
+        if stats.get('errors', 0) > 0:
+            ttk.Label(info_frame, text=f"Errors: {stats['errors']}", font=FONT_BOLD, foreground="red").pack(side=tk.LEFT, padx=15)
 
         btn_frame = ttk.Frame(self.results_frame)
         btn_frame.pack(fill=tk.X, pady=(10, 0))
 
-        self.copy_btn = ttk.Button(btn_frame, text="Copy to Clipboard", style="Success.TButton",
-                                   command=self._copy_to_clipboard)
+        self.copy_btn = ttk.Button(btn_frame, text="Copy to Clipboard", style="Success.TButton", command=self._copy_to_clipboard)
         self.copy_btn.pack(side=tk.LEFT, padx=(0, 10))
 
-        open_file_btn = ttk.Button(btn_frame, text="Open Output File", style="Secondary.TButton",
-                                   command=self._open_output_file)
+        open_file_btn = ttk.Button(btn_frame, text="Open Output File", style="Secondary.TButton", command=self._open_output_file)
         open_file_btn.pack(side=tk.LEFT, padx=5)
 
-        open_dir_btn = ttk.Button(btn_frame, text="Open Output Directory", style="Secondary.TButton",
-                                  command=self._open_output_dir)
+        open_dir_btn = ttk.Button(btn_frame, text="Open Output Directory", style="Secondary.TButton", command=self._open_output_dir)
         open_dir_btn.pack(side=tk.LEFT, padx=5)
 
         self.results_frame.pack(fill=tk.X, padx=0, pady=(15, 0))
 
     def _copy_to_clipboard(self):
-        if self.combiner and os.path.exists(self.combiner.output_file):
+        if self.processor and self.processor.combiner and os.path.exists(self.processor.combiner.output_file):
             try:
-                with open(self.combiner.output_file, 'r', encoding='utf-8') as f:
+                with open(self.processor.combiner.output_file, 'r', encoding='utf-8') as f:
                     content = f.read()
                 self.root.clipboard_clear()
                 self.root.clipboard_append(content)
                 self._log("Content copied to clipboard!")
-
                 original_text = self.copy_btn.cget("text")
                 self.copy_btn.config(text="Copied!", state=tk.DISABLED)
                 self.root.after(2000, lambda: self.copy_btn.config(text=original_text, state=tk.NORMAL))
             except Exception as e:
                 messagebox.showerror("Error", f"Could not copy to clipboard: {e}")
-                self._log(f"Error copying to clipboard: {e}")
         else:
             messagebox.showerror("Error", "Output file not found. Please generate it first.")
 
     def _open_path(self, path):
-        if not os.path.exists(path):
-            messagebox.showerror("Error", f"Path not found: {path}")
-            return
         try:
+            if not os.path.exists(path):
+                messagebox.showerror("Error", f"Path not found: {path}")
+                return
             if platform.system() == 'Windows':
                 os.startfile(path)
             elif platform.system() == 'Darwin':
@@ -1151,34 +1230,26 @@ class CodebaseTrackerUI:
             messagebox.showerror("Error", f"Could not open path: {e}")
 
     def _open_output_file(self):
-        if self.combiner and self.combiner.output_file:
-            self._open_path(self.combiner.output_file)
+        if self.processor and self.processor.combiner and self.processor.combiner.output_file:
+            self._open_path(self.processor.combiner.output_file)
 
     def _open_output_dir(self):
-        if self.combiner and self.combiner.output_dir:
-            self._open_path(self.combiner.output_dir)
+        if self.processor and self.processor.combiner and self.processor.combiner.output_dir:
+            self._open_path(self.processor.combiner.output_dir)
 
-    def _edit_watchignore(self):
+    # --- UPDATED: Renamed method and simplified logic ---
+    def _edit_track_ignore(self):
+        """Opens the track_ignore.txt file for editing."""
         if not self.project_path:
             messagebox.showerror("Error", "Please select a project folder first")
             return
-
-        if not self.scanner:
-            self.scanner = FileScanner(self.project_path)
-
-        watchignore_path = self.scanner.ignore_rules.get_watchignore_path()
-
-        if not watchignore_path.exists():
-            try:
-                with open(watchignore_path, 'w', encoding='utf-8') as f:
-                    f.write("# Add your custom ignore patterns here\n")
-                    f.write("# Example: *.log\n")
-                self._log(f"Created .watchignore at {watchignore_path}")
-            except Exception as e:
-                messagebox.showerror("Error", f"Could not create .watchignore: {e}")
-                return
-
-        self._open_path(watchignore_path)
+        
+        # The IgnoreRules class now handles the creation of the file automatically
+        # upon initialization. We just need to get the path and open it.
+        scanner = FileScanner(self.project_path)
+        track_ignore_path = scanner.ignore_rules.get_track_ignore_path()
+        
+        self._open_path(track_ignore_path)
 
 
 
@@ -1186,9 +1257,20 @@ class CodebaseTrackerUI:
 /* The following items were excluded from the output. */
 
 /* Based on .gitignore patterns: */
-/* build */
-/* dist */
+/* __pycache__/ */
+/* *.pyc */
+/* build/ */
+/* dist/ */
 /* Codebase Tracker.spec */
+/* .codebase/ */
+/* .idea/ */
+
+/* Based on track_ignore.txt patterns: */
+/* build/ */
+/* dist/ */
+/* .idea/ */
+/* __pycache__/ */
+/* .codebase/ */
 
 /* Ignored directories: */
 /* .codebase/ */
@@ -1198,8 +1280,10 @@ class CodebaseTrackerUI:
 /* .git\objects/ */
 /* .git\refs/ */
 /* .idea\inspectionProfiles/ */
+/* build\Codebase Tracker/ */
 
 /* Ignored files (by rule): */
+/* .git\COMMIT_EDITMSG */
 /* .git\HEAD */
 /* .git\config */
 /* .git\description */
@@ -1210,18 +1294,22 @@ class CodebaseTrackerUI:
 /* .idea\misc.xml */
 /* .idea\modules.xml */
 /* .idea\vcs.xml */
+/* .idea\workspace.xml */
+/* Codebase Tracker.spec */
 /* __pycache__\combiner.cpython-312.pyc */
 /* __pycache__\combiner.cpython-313.pyc */
 /* __pycache__\file_utils.cpython-312.pyc */
 /* __pycache__\file_utils.cpython-313.pyc */
 /* __pycache__\ignore_rules.cpython-312.pyc */
 /* __pycache__\ignore_rules.cpython-313.pyc */
+/* __pycache__\processor.cpython-312.pyc */
 /* __pycache__\scanner.cpython-312.pyc */
 /* __pycache__\scanner.cpython-313.pyc */
 /* __pycache__\tree_builder.cpython-312.pyc */
 /* __pycache__\tree_builder.cpython-313.pyc */
 /* __pycache__\ui.cpython-312.pyc */
 /* __pycache__\ui.cpython-313.pyc */
+/* dist\Codebase Tracker.exe */
 
 /* Ignored binary files: */
 /* icon.ico */

@@ -9,7 +9,7 @@ class FileScanner:
         self.project_path = Path(project_path).absolute()
         self.ignore_rules = IgnoreRules(self.project_path)
 
-    def scan(self, callback=None):
+    def scan(self, callback=None, cancel_event=None):
         text_files = []
         ignored_items = []
         all_files = []
@@ -17,6 +17,12 @@ class FileScanner:
         total_files_checked = 0
 
         for root, dirs, files in os.walk(self.project_path, topdown=True):
+            # === UX IMPROVEMENT: Allow cancellation ===
+            if cancel_event and cancel_event.is_set():
+                if callback:
+                    callback("Scan cancelled by user.", -1)
+                break
+
             root_path = Path(root)
             rel_root = get_relative_path(root_path, self.project_path)
 
@@ -49,12 +55,16 @@ class FileScanner:
                 dirs.remove(d)
 
             for filename in files:
+                # === UX IMPROVEMENT: Allow cancellation ===
+                if cancel_event and cancel_event.is_set():
+                    break
+                
                 file_path = root_path / filename
                 rel_path = get_relative_path(file_path, self.project_path)
                 all_files.append(rel_path)
                 total_files_checked += 1
                 if callback and total_files_checked % 50 == 0:
-                    callback(f"Scanning: {rel_path}", total_files_checked)
+                    callback(f"Scanning: {rel_path}", -1) # Use -1 progress for indeterminate updates
 
                 if self.ignore_rules.is_ignored(rel_path):
                     ignored_items.append((file_path, rel_path, "file"))
@@ -64,10 +74,12 @@ class FileScanner:
                     text_files.append((file_path, rel_path))
                 else:
                     ignored_items.append((file_path, rel_path, "binary"))
+            
+            if cancel_event and cancel_event.is_set():
+                break
 
-        if callback:
+        if callback and not (cancel_event and cancel_event.is_set()):
             callback(
-                f"Scan complete! Found {len(text_files)} text files and {len(ignored_items)} ignored items.",
-                total_files_checked)
+                f"Scan complete! Found {len(text_files)} text files and {len(ignored_items)} ignored items.", -1)
 
         return text_files, ignored_items, all_files

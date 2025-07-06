@@ -1,6 +1,5 @@
 import os
 import mimetypes
-import chardet
 from pathlib import Path
 
 # Common binary file extensions
@@ -64,25 +63,29 @@ def is_text_file(file_path):
                 mime_type.startswith('video/') or mime_type.startswith('font/')):
             return False
 
-    # For files without extension or unknown MIME type, try to detect encoding
+    # === PERFORMANCE OPTIMIZATION: Replaced chardet with a faster null-byte check ===
     try:
-        if file_path.stat().st_size > 1024 * 1024:  # Skip files larger than 1MB
-            return False
-
-        # Read a sample of the file to detect encoding
+        # For files without extension or unknown MIME type, use a fast heuristic.
+        # Check for NULL bytes in the first few KB, which is a strong indicator of a binary file.
         with open(file_path, 'rb') as f:
-            sample = f.read(4096)  # Read first 4KB
-            if not sample:
+            chunk = f.read(4096)  # Read first 4KB
+            if not chunk:
                 return True  # Empty file is considered text
 
-            # Try to detect the encoding
-            result = chardet.detect(sample)
-            return result['encoding'] is not None and result['confidence'] > 0.7
+            # If a NULL byte is found, it's almost certainly a binary file.
+            if b'\0' in chunk:
+                return False
+        
+        # If no NULL bytes, it's likely a text file.
+        # We can still attempt to decode as UTF-8 as a final check.
+        try:
+            chunk.decode('utf-8')
+            return True
+        except UnicodeDecodeError:
+            return False  # Contains non-UTF8 characters, treat as binary.
+
     except (IOError, OSError):
         return False
-
-    # Default to non-text if we couldn't determine
-    return False
 
 
 def format_file_size(size_bytes):

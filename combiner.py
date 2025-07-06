@@ -14,7 +14,7 @@ class FileCombiner:
 
         ensure_directory(self.output_dir)
 
-    def combine(self, text_files, ignored_items, ignore_rules, all_files=None, callback=None):
+    def combine(self, text_files, ignored_items, ignore_rules, all_files=None, callback=None, cancel_event=None):
         try:
             total_text_files = len(text_files)
             ignored_count = len(ignored_items)
@@ -50,24 +50,32 @@ class FileCombiner:
                     total_chars += len(formatted_tree)
 
                 for absolute_path, relative_path in text_files:
+                    if cancel_event and cancel_event.is_set():
+                        if callback:
+                            callback("Combine process cancelled.", -1)
+                        break
+
                     files_processed += 1
                     if callback:
                         callback(f"Processing ({files_processed}/{total_text_files}): {relative_path}",
-                                 files_processed / total_text_files)
+                                 0.5 + (files_processed / total_text_files) * 0.5)
 
                     try:
                         with open(absolute_path, 'r', encoding='utf-8', errors='replace') as infile:
                             content = infile.read()
-                            file_header = f"/* ===== {relative_path} ===== */\n"
-                            outfile.write(file_header)
-                            outfile.write(content)
-                            outfile.write("\n\n")
-                            total_chars += len(file_header) + len(content) + 2
+                        file_header = f"/* ===== {relative_path} ===== */\n"
+                        outfile.write(file_header)
+                        outfile.write(content)
+                        outfile.write("\n\n")
+                        total_chars += len(file_header) + len(content) + 2
                     except Exception as e:
                         error_count += 1
                         error_msg = f"/* ===== ERROR: Could not read file: {relative_path} ===== */\n/* {str(e)} */\n\n"
                         outfile.write(error_msg)
                         total_chars += len(error_msg)
+                
+                if cancel_event and cancel_event.is_set():
+                    return False, "Process cancelled by user.", {}
 
                 if ignored_items:
                     rule_summary = ignore_rules.get_rule_summary()
@@ -80,21 +88,19 @@ class FileCombiner:
                             ignore_section += f"/* {pattern} */\n"
                         ignore_section += "\n"
 
-                    if rule_summary['watchignore']['found'] and rule_summary['watchignore']['patterns']:
-                        ignore_section += "/* Based on .watchignore patterns: */\n"
-                        for pattern in rule_summary['watchignore']['patterns']:
+                    # --- UPDATED: Check for 'track_ignore' instead of 'watchignore' ---
+                    if rule_summary['track_ignore']['found'] and rule_summary['track_ignore']['patterns']:
+                        ignore_section += f"/* Based on {ignore_rules.get_track_ignore_path().name} patterns: */\n"
+                        for pattern in rule_summary['track_ignore']['patterns']:
                             ignore_section += f"/* {pattern} */\n"
                         ignore_section += "\n"
 
                     outfile.write(ignore_section)
                     total_chars += len(ignore_section)
 
-                    ignored_dirs = sorted([item for item in ignored_items if item[2] == "directory"],
-                                          key=lambda x: x[1])
-                    ignored_files_by_rule = sorted([item for item in ignored_items if item[2] == "file"],
-                                                   key=lambda x: x[1])
-                    ignored_binary_files = sorted([item for item in ignored_items if item[2] == "binary"],
-                                                  key=lambda x: x[1])
+                    ignored_dirs = sorted([item for item in ignored_items if item[2] == "directory"], key=lambda x: x[1])
+                    ignored_files_by_rule = sorted([item for item in ignored_items if item[2] == "file"], key=lambda x: x[1])
+                    ignored_binary_files = sorted([item for item in ignored_items if item[2] == "binary"], key=lambda x: x[1])
 
                     if ignored_dirs:
                         outfile.write("/* Ignored directories: */\n")
@@ -129,7 +135,7 @@ class FileCombiner:
             }
 
             if callback:
-                callback(f"Done! Combined {total_text_files} text files into {self.output_file}", 1.0)
+                callback(f"Done! Combined {total_text_files} text files into {self.output_file.name}", 1.0)
 
             return True, f"Successfully combined {total_text_files} text files.", stats
 
