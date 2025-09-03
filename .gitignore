@@ -1,13 +1,7 @@
-# Python
+# Added by CodebaseTracker
+.codebase/
+build/
+dist/
+Codebase Tracker.spec
 __pycache__/
 *.pyc
-
-# Build artifacts
-build/
-Codebase Tracker.spec
-
-# Tool output
-.codebase/
-
-# IDE
-.idea/
