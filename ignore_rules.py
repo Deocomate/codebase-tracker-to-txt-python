@@ -26,7 +26,7 @@ TRACK_IGNORE_EXAMPLE = "# Ví dụ: build/\n# Ví dụ: *.log\n"
 class IgnoreRules:
     def __init__(self, project_path):
         self.project_path = Path(project_path).absolute()
-        self.codebase_dir = self.project_path / '.codebase'
+        self.codebase_dir = self.project_path / '_codebase'
 
         # Ignore rules (deny list)
         self.ignore_rules = []
@@ -141,7 +141,7 @@ class IgnoreRules:
         """Check if a path should be ignored by any ignore rule."""
         path_str = self._normalize_path(path)
 
-        if path_str == '.codebase' or path_str.startswith('.codebase/'):
+        if path_str == '_codebase' or path_str.startswith('_codebase/'):
             return True
 
         for rule_set in self.ignore_rules:

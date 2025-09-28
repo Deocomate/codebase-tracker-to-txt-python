@@ -56,8 +56,8 @@ class TreeBuilder:
                 rel_path = file_item
                 is_dir = os.path.isdir(os.path.join(project_path, rel_path))
 
-            # Skip .codebase directory
-            if str(rel_path).startswith('.codebase'):
+            # Skip _codebase directory
+            if str(rel_path).startswith('_codebase'):
                 continue
 
             # Create path components

@@ -8,7 +8,7 @@ from tree_builder import TreeBuilder
 class FileCombiner:
     def __init__(self, project_path):
         self.project_path = Path(project_path).absolute()
-        self.output_dir = self.project_path / '.codebase'
+        self.output_dir = self.project_path / '_codebase'
         self.output_file = self.output_dir / 'codebase.txt'
         self.tree_builder = TreeBuilder()
 

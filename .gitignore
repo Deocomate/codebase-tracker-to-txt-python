@@ -1,5 +1,6 @@
 # Added by CodebaseTracker
 .codebase/
+_codebase/
 build/
 dist/
 Codebase Tracker.spec

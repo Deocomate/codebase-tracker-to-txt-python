@@ -188,7 +188,7 @@ class CodebaseTrackerUI:
 
     def _add_to_gitignore(self, project_path):
         gitignore_path = os.path.join(project_path, '.gitignore')
-        line_to_add = ".codebase/"
+        line_to_add = "_codebase/"
         try:
             if os.path.exists(gitignore_path):
                 with open(gitignore_path, 'r+', encoding='utf-8') as f:
@@ -343,14 +343,14 @@ class CodebaseTrackerUI:
         if not self.project_path:
             return
 
-        output_dir_path = os.path.join(self.project_path, '.codebase')
+        output_dir_path = os.path.join(self.project_path, '_codebase')
         if not os.path.isdir(output_dir_path):
-            self.status_var.set("Output directory (.codebase) not found.")
+            self.status_var.set("Output directory (_codebase) not found.")
             return
 
         try:
             shutil.rmtree(output_dir_path)
-            self.status_var.set("Output directory '.codebase' has been deleted.")
+            self.status_var.set("Output directory '_codebase' has been deleted.")
             self.results_frame.pack_forget()
         except Exception as e:
             messagebox.showerror("Error", f"Failed to delete directory: {e}")
