@@ -17,6 +17,7 @@ Codebase Tracker là một ứng dụng Python với giao diện hiện đại g
 - **Tùy chỉnh ignore**: Cho phép thêm các quy tắc bỏ qua tùy chỉnh thông qua tệp `.watchignore`.
 - **Hiển thị cấu trúc dự án**: Tự động tạo một cây thư mục trong file kết quả để AI dễ dàng hình dung cấu trúc.
 - **Thống kê chi tiết**: Cung cấp thông tin trực quan về số lượng file, tổng số ký tự và các mục đã bỏ qua.
+- **Manifest JSON chi tiết**: Tạo kèm `manifest.json` ghi lại hash, kích thước và số dòng của từng file, giúp tích hợp dễ dàng với các pipeline AI khác.
 
 ## Tại sao cần Codebase Tracker?
 
@@ -85,6 +86,7 @@ Tệp `codebase.txt` được tạo trong thư mục `.codebase` của dự án 
 - **Nội dung file text**: Toàn bộ nội dung của các file văn bản, đi kèm đường dẫn tương đối.
 - **Danh sách file nhị phân**: Chỉ liệt kê đường dẫn đến các file nhị phân.
 - **Danh sách mục bỏ qua**: Các thư mục và file bị bỏ qua theo quy tắc.
+- **Manifest JSON**: Tệp `manifest.json` chứa metadata (SHA-256, kích thước, số dòng tối ưu, quy tắc ignore) của từng file và toàn bộ phiên quét.
 
 ## Xây dựng file thực thi (.exe)
 

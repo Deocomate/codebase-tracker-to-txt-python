@@ -295,7 +295,10 @@ class CodebaseTrackerUI:
             widget.destroy()
 
         stats = self.output_stats
-        if not stats: return
+        if not stats:
+            return
+
+        self.manifest_path_var = None
 
         info_frame = ttk.Frame(self.results_frame)
         info_frame.pack(fill=tk.X, pady=(0, 10))
@@ -319,6 +322,21 @@ class CodebaseTrackerUI:
                                    command=self._copy_output_path)
         copy_path_btn.grid(row=0, column=1, sticky="e", padx=(8, 0))
 
+        manifest_path = stats.get('manifest_file')
+        if manifest_path:
+            manifest_frame = ttk.Frame(self.results_frame)
+            manifest_frame.pack(fill=tk.X, pady=(0, 10))
+            manifest_frame.columnconfigure(0, weight=1)
+
+            self.manifest_path_var = tk.StringVar(value=manifest_path)
+            manifest_entry = ttk.Entry(manifest_frame, textvariable=self.manifest_path_var, state="readonly",
+                                       font=FONT_NORMAL)
+            manifest_entry.grid(row=0, column=0, sticky="ew")
+
+            copy_manifest_btn = ttk.Button(manifest_frame, text="Copy Manifest Path", style="Small.Secondary.TButton",
+                                           command=self._copy_manifest_path)
+            copy_manifest_btn.grid(row=0, column=1, sticky="e", padx=(8, 0))
+
         btn_frame = ttk.Frame(self.results_frame)
         btn_frame.pack(fill=tk.X, pady=(5, 0))
 
@@ -330,6 +348,11 @@ class CodebaseTrackerUI:
         open_file_btn = ttk.Button(btn_frame, text="Open File", style="Secondary.TButton",
                                    command=self._open_output_file)
         open_file_btn.pack(side=tk.LEFT, padx=(0, 5))
+
+        if manifest_path:
+            open_manifest_btn = ttk.Button(btn_frame, text="Open Manifest", style="Secondary.TButton",
+                                           command=self._open_manifest_file)
+            open_manifest_btn.pack(side=tk.LEFT, padx=(0, 5))
 
         open_dir_btn = ttk.Button(btn_frame, text="Open Dir", style="Secondary.TButton", command=self._open_output_dir)
         open_dir_btn.pack(side=tk.LEFT, padx=(0, 5))
@@ -389,6 +412,15 @@ class CodebaseTrackerUI:
             self.root.clipboard_append(path)
             self.status_var.set("Output file path copied to clipboard!")
 
+    def _copy_manifest_path(self):
+        manifest_var = getattr(self, 'manifest_path_var', None)
+        if manifest_var:
+            path = manifest_var.get()
+            if path:
+                self.root.clipboard_clear()
+                self.root.clipboard_append(path)
+                self.status_var.set("Manifest path copied to clipboard!")
+
     def _open_path(self, path):
         try:
             if not os.path.exists(path):
@@ -407,6 +439,11 @@ class CodebaseTrackerUI:
         output_file = self.output_stats.get('output_file')
         if output_file:
             self._open_path(output_file)
+
+    def _open_manifest_file(self):
+        manifest_file = self.output_stats.get('manifest_file')
+        if manifest_file:
+            self._open_path(manifest_file)
 
     def _open_output_dir(self):
         output_dir = self.output_stats.get('output_file')

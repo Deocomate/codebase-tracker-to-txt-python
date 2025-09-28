@@ -1,5 +1,7 @@
-import os
 import time
+import json
+import io
+import hashlib
 from pathlib import Path
 from file_utils import ensure_directory
 from tree_builder import TreeBuilder
@@ -10,6 +12,7 @@ class FileCombiner:
         self.project_path = Path(project_path).absolute()
         self.output_dir = self.project_path / '_codebase'
         self.output_file = self.output_dir / 'codebase.txt'
+        self.manifest_file = self.output_dir / 'manifest.json'
         self.tree_builder = TreeBuilder()
 
         ensure_directory(self.output_dir)
@@ -19,6 +22,39 @@ class FileCombiner:
             '.js': '//', '.ts': '//', '.java': '//', '.c': '//', '.cpp': '//', '.h': '//',
             '.cs': '//', '.go': '//', '.rs': '//', '.swift': '//', '.kt': '//'
         }
+
+    def _should_skip_line(self, line, comment_marker):
+        stripped_line = line.strip()
+        if not stripped_line:
+            return True
+
+        if comment_marker and stripped_line.startswith(comment_marker):
+            return True
+
+        return False
+
+    def _write_streaming_content(self, text_stream, outfile, comment_marker):
+        original_lines = 0
+        optimized_lines = 0
+        optimized_chars = 0
+
+        for raw_line in text_stream:
+            original_lines += 1
+
+            if self._should_skip_line(raw_line, comment_marker):
+                continue
+
+            if raw_line.endswith('\n'):
+                outfile.write(raw_line)
+                line_length = len(raw_line)
+            else:
+                outfile.write(raw_line + '\n')
+                line_length = len(raw_line) + 1
+
+            optimized_lines += 1
+            optimized_chars += line_length
+
+        return original_lines, optimized_lines, optimized_chars
 
     def _optimize_content(self, content, file_path):
         """
@@ -52,6 +88,30 @@ class FileCombiner:
             error_count = 0
             timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
 
+            manifest_data = {
+                "project": self.project_path.name,
+                "generated_at": timestamp,
+                "output_file": str(self.output_file),
+                "text_files_total": total_text_files,
+                "ignored_items_total": ignored_count,
+                "files": [],
+                "ignored": {
+                    "items": [],
+                    "binary": [],
+                    "rules": []
+                },
+                "errors": [],
+                "ignore_rules": {},
+                "statistics": {
+                    "total_chars": 0,
+                    "total_optimized_lines": 0,
+                    "total_original_lines": 0,
+                    "total_skipped_lines": 0
+                }
+            }
+            if ignore_rules:
+                manifest_data["ignore_rules"] = ignore_rules.get_rule_summary()
+
             with open(self.output_file, 'w', encoding='utf-8') as outfile:
                 header = f"/* ==========================================================\n" \
                          f"   CODEBASE SNAPSHOT - {timestamp}\n" \
@@ -78,6 +138,14 @@ class FileCombiner:
                     outfile.write(formatted_tree)
                     total_chars += len(formatted_tree)
 
+                for abs_path, rel_path, reason in ignored_items:
+                    entry = {"path": rel_path, "reason": reason}
+                    manifest_data["ignored"]["items"].append(entry)
+                    if reason == "binary":
+                        manifest_data["ignored"]["binary"].append(entry.copy())
+                    else:
+                        manifest_data["ignored"]["rules"].append(entry.copy())
+
                 for absolute_path, relative_path in text_files:
                     if cancel_event and cancel_event.is_set():
                         if callback:
@@ -90,26 +158,57 @@ class FileCombiner:
                                  0.5 + (files_processed / total_text_files) * 0.5)
 
                     try:
-                        with open(absolute_path, 'r', encoding='utf-8', errors='replace') as infile:
-                            content = infile.read()
+                        comment_marker = self.comment_markers.get(Path(relative_path).suffix.lower())
+                        hasher = hashlib.sha256()
 
-                        optimized_content = self._optimize_content(content, relative_path)
+                        with open(absolute_path, 'rb') as raw_file:
+                            for chunk in iter(lambda: raw_file.read(1048576), b''):
+                                hasher.update(chunk)
+                            raw_file.seek(0)
 
-                        file_header = f"/* ===== {relative_path} ===== */\n"
-                        outfile.write(file_header)
-                        outfile.write(optimized_content)
+                            text_stream = io.TextIOWrapper(raw_file, encoding='utf-8', errors='replace')
+                            try:
+                                file_header = f"/* ===== {relative_path} ===== */\n"
+                                outfile.write(file_header)
+                                original_lines, optimized_lines, optimized_chars = self._write_streaming_content(
+                                    text_stream, outfile, comment_marker
+                                )
+                            finally:
+                                text_stream.detach()
+
                         outfile.write("\n\n")
-                        total_chars += len(file_header) + len(optimized_content) + 2
+
+                        skipped_lines = max(original_lines - optimized_lines, 0)
+                        file_stats = {
+                            "path": relative_path,
+                            "size_bytes": absolute_path.stat().st_size,
+                            "sha256": hasher.hexdigest(),
+                            "original_lines": original_lines,
+                            "optimized_lines": optimized_lines,
+                            "optimized_chars": optimized_chars,
+                            "skipped_lines": skipped_lines
+                        }
+                        manifest_data["files"].append(file_stats)
+                        manifest_data["statistics"]["total_optimized_lines"] += optimized_lines
+                        manifest_data["statistics"]["total_original_lines"] += original_lines
+                        manifest_data["statistics"]["total_skipped_lines"] += skipped_lines
+
+                        total_chars += len(file_header) + optimized_chars + 2
                     except Exception as e:
                         error_count += 1
                         error_msg = f"/* ===== ERROR: Could not read file: {relative_path} ===== */\n/* {str(e)} */\n\n"
                         outfile.write(error_msg)
                         total_chars += len(error_msg)
+                        manifest_data["errors"].append({
+                            "path": relative_path,
+                            "error": str(e)
+                        })
 
                 if cancel_event and cancel_event.is_set():
                     return False, "Process cancelled by user.", {}
 
-                # CẬP NHẬT: Toàn bộ khối 'if ignored_items:' đã được xóa bỏ từ đây.
+            manifest_data["statistics"]["total_chars"] = total_chars
+            manifest_data["statistics"]["errors"] = error_count
 
             stats = {
                 'text_files': total_text_files,
@@ -119,8 +218,12 @@ class FileCombiner:
                 'total_chars': total_chars,
                 'errors': error_count,
                 'output_file': str(self.output_file),
+                'manifest_file': str(self.manifest_file),
                 'timestamp': timestamp
             }
+
+            with open(self.manifest_file, 'w', encoding='utf-8') as manifest_fp:
+                json.dump(manifest_data, manifest_fp, ensure_ascii=False, indent=2)
 
             if callback:
                 callback(f"Done! Combined {total_text_files} text files into {self.output_file.name}", 1.0)
