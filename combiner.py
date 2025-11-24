@@ -12,7 +12,7 @@ class FileCombiner:
         self.project_path = Path(project_path).absolute()
         self.output_dir = self.project_path / '_codebase'
         self.output_file = self.output_dir / 'codebase.txt'
-        self.manifest_file = self.output_dir / 'manifest.json'
+        self.structure_file = self.output_dir / 'codebase_structure.txt'
         self.tree_builder = TreeBuilder()
 
         ensure_directory(self.output_dir)
@@ -88,63 +88,39 @@ class FileCombiner:
             error_count = 0
             timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
 
-            manifest_data = {
-                "project": self.project_path.name,
-                "generated_at": timestamp,
-                "output_file": str(self.output_file),
-                "text_files_total": total_text_files,
-                "ignored_items_total": ignored_count,
-                "files": [],
-                "ignored": {
-                    "items": [],
-                    "binary": [],
-                    "rules": []
-                },
-                "errors": [],
-                "ignore_rules": {},
-                "statistics": {
-                    "total_chars": 0,
-                    "total_optimized_lines": 0,
-                    "total_original_lines": 0,
-                    "total_skipped_lines": 0
-                }
-            }
-            if ignore_rules:
-                manifest_data["ignore_rules"] = ignore_rules.get_rule_summary()
+            files_processed = 0
+            total_chars = 0
+            error_count = 0
+            timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
 
+            # 1. Generate and write directory structure to codebase_structure.txt
+            if all_files:
+                ignored_dirs = [item for item in ignored_items if item[2] == "directory"]
+                tree_structure = self.tree_builder.build_tree(
+                    self.project_path,
+                    ignored_dirs,
+                    all_files
+                )
+                
+                with open(self.structure_file, 'w', encoding='utf-8') as struct_file:
+                    struct_header = f"/* ==========================================================\n" \
+                                    f"   PROJECT STRUCTURE - {timestamp}\n" \
+                                    f"   Project: {self.project_path.name}\n" \
+                                    f"   ========================================================== */\n\n"
+                    struct_file.write(struct_header)
+                    struct_file.write(tree_structure)
+
+            # 2. Generate and write code content to codebase.txt
             with open(self.output_file, 'w', encoding='utf-8') as outfile:
                 header = f"/* ==========================================================\n" \
                          f"   CODEBASE SNAPSHOT - {timestamp}\n" \
                          f"   Project: {self.project_path.name}\n" \
                          f"   Text Files Included: {total_text_files}\n" \
                          f"   Items Ignored: {ignored_count}\n" \
+                         f"   Structure File: codebase_structure.txt\n" \
                          f"   ========================================================== */\n\n"
                 outfile.write(header)
                 total_chars += len(header)
-
-                if all_files:
-                    ignored_dirs = [item for item in ignored_items if item[2] == "directory"]
-                    tree_structure = self.tree_builder.build_tree(
-                        self.project_path,
-                        ignored_dirs,
-                        all_files
-                    )
-                    tree_header = "/* PROJECT STRUCTURE\n" \
-                                  f"   {'-' * 60}\n"
-                    tree_footer = f"   {'-' * 60} */\n\n"
-
-                    tree_lines = [f"   {line}" for line in tree_structure.split('\n')]
-                    formatted_tree = tree_header + '\n'.join(tree_lines) + '\n' + tree_footer
-                    outfile.write(formatted_tree)
-                    total_chars += len(formatted_tree)
-
-                for abs_path, rel_path, reason in ignored_items:
-                    entry = {"path": rel_path, "reason": reason}
-                    manifest_data["ignored"]["items"].append(entry)
-                    if reason == "binary":
-                        manifest_data["ignored"]["binary"].append(entry.copy())
-                    else:
-                        manifest_data["ignored"]["rules"].append(entry.copy())
 
                 for absolute_path, relative_path in text_files:
                     if cancel_event and cancel_event.is_set():
@@ -179,36 +155,16 @@ class FileCombiner:
                         outfile.write("\n\n")
 
                         skipped_lines = max(original_lines - optimized_lines, 0)
-                        file_stats = {
-                            "path": relative_path,
-                            "size_bytes": absolute_path.stat().st_size,
-                            "sha256": hasher.hexdigest(),
-                            "original_lines": original_lines,
-                            "optimized_lines": optimized_lines,
-                            "optimized_chars": optimized_chars,
-                            "skipped_lines": skipped_lines
-                        }
-                        manifest_data["files"].append(file_stats)
-                        manifest_data["statistics"]["total_optimized_lines"] += optimized_lines
-                        manifest_data["statistics"]["total_original_lines"] += original_lines
-                        manifest_data["statistics"]["total_skipped_lines"] += skipped_lines
-
+                        
                         total_chars += len(file_header) + optimized_chars + 2
                     except Exception as e:
                         error_count += 1
                         error_msg = f"/* ===== ERROR: Could not read file: {relative_path} ===== */\n/* {str(e)} */\n\n"
                         outfile.write(error_msg)
                         total_chars += len(error_msg)
-                        manifest_data["errors"].append({
-                            "path": relative_path,
-                            "error": str(e)
-                        })
 
                 if cancel_event and cancel_event.is_set():
                     return False, "Process cancelled by user.", {}
-
-            manifest_data["statistics"]["total_chars"] = total_chars
-            manifest_data["statistics"]["errors"] = error_count
 
             stats = {
                 'text_files': total_text_files,
@@ -218,12 +174,9 @@ class FileCombiner:
                 'total_chars': total_chars,
                 'errors': error_count,
                 'output_file': str(self.output_file),
-                'manifest_file': str(self.manifest_file),
+                'structure_file': str(self.structure_file),
                 'timestamp': timestamp
             }
-
-            with open(self.manifest_file, 'w', encoding='utf-8') as manifest_fp:
-                json.dump(manifest_data, manifest_fp, ensure_ascii=False, indent=2)
 
             if callback:
                 callback(f"Done! Combined {total_text_files} text files into {self.output_file.name}", 1.0)

@@ -1,3 +1,4 @@
 chardet==5.2.0
 pathspec==0.12.1
 tkinterdnd2==0.4.3
+pyinstaller==6.16.0
