@@ -11,9 +11,10 @@
 *   **Giao diện hiện đại & Dễ sử dụng**: Hỗ trợ Kéo & Thả (Drag & Drop) thư mục dự án trực tiếp vào ứng dụng.
 *   **Gộp mã nguồn thông minh**: Tự động quét và gộp nội dung của tất cả các tệp văn bản vào `codebase.txt`.
 *   **Cây thư mục trực quan**: Tạo sơ đồ cấu trúc thư mục giúp AI dễ dàng hình dung tổ chức dự án.
-*   **Hệ thống Ignore linh hoạt**:
+*   **Hệ thống Cấu hình linh hoạt**:
     *   Tự động tuân thủ `.gitignore`.
-    *   Hỗ trợ quy tắc tùy chỉnh qua `.watchignore`.
+    *   Quản lý tập trung qua `codebase_tracker_settings.json`.
+    *   Hỗ trợ chế độ `track_only` (chỉ quét file chỉ định) và `ignore_patterns` (bỏ qua file).
     *   Tự động phát hiện và bỏ qua các tệp nhị phân (binary files).
 *   **Thống kê & Báo cáo**: Hiển thị số lượng file, tổng dung lượng và các file bị bỏ qua.
 *   **Sao chép nhanh**: Tính năng "Copy to Clipboard" giúp đưa toàn bộ context vào AI chỉ với một cú click.
@@ -130,6 +131,26 @@
     *   Nhấn **"Copy to Clipboard"** để sao chép toàn bộ nội dung.
     *   File kết quả `codebase.txt` (nội dung mã nguồn) và `codebase_structure.txt` (cấu trúc thư mục) sẽ được lưu trong thư mục `_codebase/` bên trong dự án của bạn.
     *   Bạn có thể mở nhanh file hoặc thư mục kết quả bằng các nút tương ứng.
+
+## ⚙️ Cấu hình (Configuration)
+
+Ứng dụng sử dụng file `_codebase/codebase_tracker_settings.json` để quản lý các quy tắc quét. File này sẽ tự động được tạo khi bạn chọn dự án.
+
+**Cấu trúc file:**
+```json
+{
+    "track_only": ["*"],          // Danh sách file/folder CẦN quét (Allow-list). Mặc định "*" là tất cả.
+    "ignore_patterns": [          // Danh sách file/folder CẦN BỎ QUA (Deny-list).
+        ".git/",
+        "node_modules/",
+        "*.log"
+    ]
+}
+```
+
+**Các nút chức năng:**
+*   **Edit Settings**: Mở file cấu hình JSON để chỉnh sửa.
+*   **Reset Settings**: Khôi phục cấu hình về mặc định.
 
 ## 🛠️ Xây dựng file thực thi (Build)
 

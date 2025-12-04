@@ -1,4 +1,5 @@
 import os
+import json
 import pathspec
 from pathlib import Path
 from file_utils import ensure_directory
@@ -11,45 +12,34 @@ DEFAULT_IGNORE_PATTERNS = [
     '*.lockb', '*.log', '*.tmp', '*.bak', '*.swp', '*.DS_Store'
 ]
 
-# MỚI: Hằng số cho file track_only.txt
-TRACK_ONLY_FILENAME = "track_only.txt"
-TRACK_ONLY_HEADER = "# File này giúp bạn CHỈ ĐỊNH các file và thư mục cần quét (Cú pháp tương tự .gitignore)."
-TRACK_ONLY_EXAMPLE = "# Mặc định là '*' (quét tất cả).\n# Ví dụ: chỉ quét thư mục 'src' và các file '.py':\n# src/\n# *.py\n"
-DEFAULT_TRACK_ONLY_PATTERN = "*"
+SETTINGS_FILENAME = "codebase_tracker_settings.json"
 
-# Cập nhật hằng số cho track_ignore.txt để rõ ràng hơn
-TRACK_IGNORE_FILENAME = "track_ignore.txt"
-TRACK_IGNORE_HEADER = "# File này giúp bạn BỎ QUA (ignore) các file và thư mục khỏi quá trình quét (Cú pháp tương tự .gitignore)."
-TRACK_IGNORE_EXAMPLE = "# Ví dụ: build/\n# Ví dụ: *.log\n"
-
+DEFAULT_SETTINGS = {
+    "track_only": ["*"],
+    "ignore_patterns": DEFAULT_IGNORE_PATTERNS,
+    "description": "Configure which files to track or ignore. 'track_only' is an allow-list (default '*' means all). 'ignore_patterns' is a deny-list."
+}
 
 class IgnoreRules:
     def __init__(self, project_path):
         self.project_path = Path(project_path).absolute()
         self.codebase_dir = self.project_path / '_codebase'
+        self.settings_path = self.codebase_dir / SETTINGS_FILENAME
 
-        # Ignore rules (deny list)
+        # Rules
         self.ignore_rules = []
         self.gitignore_found = False
-        self.track_ignore_found = False
         self.gitignore_patterns = []
-        self.track_ignore_patterns = []
-        self.default_patterns = DEFAULT_IGNORE_PATTERNS.copy()
-
-        # MỚI: Only rules (allow list)
+        
+        self.settings = DEFAULT_SETTINGS.copy()
         self.track_only_spec = None
-        self.track_only_found = False
-        self.track_only_patterns = []
         self.has_user_defined_only_rules = False
 
         ensure_directory(self.codebase_dir)
 
         self._load_gitignore()
-        self._load_track_ignore()
-        self._add_default_patterns()
-
-        # MỚI: Tải quy tắc track_only
-        self._load_track_only()
+        self._load_settings()
+        self._compile_rules()
 
     def _load_gitignore(self):
         """Load rules from .gitignore file if it exists"""
@@ -66,74 +56,83 @@ class IgnoreRules:
             except Exception as e:
                 print(f"Error loading .gitignore: {e}")
 
-    def _load_track_ignore(self):
-        """Load rules from track_ignore.txt. If it doesn't exist, create it."""
-        track_ignore_path = self.get_track_ignore_path()
+    def _load_settings(self):
+        """Load settings from JSON file. If it doesn't exist, create it."""
         try:
-            if not track_ignore_path.exists():
-                with open(track_ignore_path, 'w', encoding='utf-8') as f:
-                    f.write(TRACK_IGNORE_HEADER + '\n\n')
-                    f.write(TRACK_IGNORE_EXAMPLE)
-                self.track_ignore_found = True
-                return
-
-            with open(track_ignore_path, 'r', encoding='utf-8') as f:
-                lines = f.read().splitlines()
-
-            self.track_ignore_patterns = [line.strip() for line in lines if
-                                          line.strip() and not line.strip().startswith('#')]
-            if self.track_ignore_patterns:
-                self.ignore_rules.append(pathspec.PathSpec.from_lines('gitwildmatch', self.track_ignore_patterns))
-            self.track_ignore_found = True
+            if not self.settings_path.exists():
+                self._create_default_settings()
+            
+            with open(self.settings_path, 'r', encoding='utf-8') as f:
+                loaded_settings = json.load(f)
+                # Merge with defaults to ensure all keys exist
+                self.settings.update(loaded_settings)
+                
         except Exception as e:
-            print(f"Error loading or creating {TRACK_IGNORE_FILENAME}: {e}")
+            print(f"Error loading or creating {SETTINGS_FILENAME}: {e}")
+            # Fallback to defaults if error
+            self.settings = DEFAULT_SETTINGS.copy()
 
-    # MỚI: Hàm để tải và xử lý track_only.txt
-    def _load_track_only(self):
-        """Load rules from track_only.txt. If it doesn't exist, create it with '*'."""
-        track_only_path = self.get_track_only_path()
+    def _create_default_settings(self):
+        """Create the default settings file."""
         try:
-            if not track_only_path.exists():
-                with open(track_only_path, 'w', encoding='utf-8') as f:
-                    f.write(TRACK_ONLY_HEADER + '\n\n')
-                    f.write(TRACK_ONLY_EXAMPLE)
-                    f.write(f"{DEFAULT_TRACK_ONLY_PATTERN}\n")
-                self.track_only_found = True
-
-            with open(track_only_path, 'r', encoding='utf-8') as f:
-                lines = f.read().splitlines()
-
-            self.track_only_patterns = [line.strip() for line in lines if
-                                        line.strip() and not line.strip().startswith('#')]
-
-            # Nếu file rỗng hoặc chỉ chứa '*', coi như không có quy tắc tùy chỉnh
-            if not self.track_only_patterns or self.track_only_patterns == [DEFAULT_TRACK_ONLY_PATTERN]:
-                self.has_user_defined_only_rules = False
-                # Vẫn tạo spec để match tất cả mọi thứ
-                self.track_only_spec = pathspec.PathSpec.from_lines('gitwildmatch', [DEFAULT_TRACK_ONLY_PATTERN])
-            else:
-                self.has_user_defined_only_rules = True
-                self.track_only_spec = pathspec.PathSpec.from_lines('gitwildmatch', self.track_only_patterns)
-
-            self.track_only_found = True
+            with open(self.settings_path, 'w', encoding='utf-8') as f:
+                json.dump(DEFAULT_SETTINGS, f, indent=4, ensure_ascii=False)
         except Exception as e:
-            print(f"Error loading or creating {TRACK_ONLY_FILENAME}: {e}")
+            print(f"Error creating default settings: {e}")
 
-    def _add_default_patterns(self):
-        """Add default ignore patterns"""
-        self.ignore_rules.append(pathspec.PathSpec.from_lines('gitwildmatch', DEFAULT_IGNORE_PATTERNS))
+    def reset_settings(self):
+        """Reset settings to default."""
+        self.settings = DEFAULT_SETTINGS.copy()
+        self._create_default_settings()
+        self._compile_rules()
+
+    def _compile_rules(self):
+        """Compile pathspecs from settings."""
+        # Reset ignore rules (keep gitignore if it was added first? No, ignore_rules list is mixed)
+        # Actually, I should rebuild ignore_rules list.
+        # But gitignore is added in __init__ before _load_settings.
+        # So I should clear ignore_rules and re-add gitignore if I want to be clean, or just append?
+        # The current implementation appends.
+        # Let's clear and rebuild to be safe in reset_settings, but wait, gitignore is loaded once.
+        
+        # Better approach:
+        self.ignore_rules = []
+        if self.gitignore_found:
+             # Re-add gitignore rules. I need to store the spec or re-read?
+             # I stored gitignore_patterns.
+             if self.gitignore_patterns:
+                 self.ignore_rules.append(pathspec.PathSpec.from_lines('gitwildmatch', self.gitignore_patterns))
+
+        # Compile ignore patterns from settings
+        ignore_patterns = self.settings.get("ignore_patterns", [])
+        if ignore_patterns:
+            self.ignore_rules.append(pathspec.PathSpec.from_lines('gitwildmatch', ignore_patterns))
+
+        # Compile track_only patterns
+        track_only_patterns = self.settings.get("track_only", ["*"])
+        
+        # If only ["*"], treat as no restriction
+        if not track_only_patterns or track_only_patterns == ["*"]:
+            self.has_user_defined_only_rules = False
+            self.track_only_spec = pathspec.PathSpec.from_lines('gitwildmatch', ["*"])
+        else:
+            self.has_user_defined_only_rules = True
+            self.track_only_spec = pathspec.PathSpec.from_lines('gitwildmatch', track_only_patterns)
 
     def _normalize_path(self, path):
         if isinstance(path, Path):
-            rel_path = path.relative_to(self.project_path) if path.is_absolute() else path
-            return str(rel_path).replace('\\', '/')
+            try:
+                rel_path = path.relative_to(self.project_path) if path.is_absolute() else path
+                return str(rel_path).replace('\\', '/')
+            except ValueError:
+                # If path is not relative to project_path (should not happen often in this context)
+                return str(path).replace('\\', '/')
         return path.replace('\\', '/')
 
-    # MỚI: Kiểm tra xem một đường dẫn có được phép bởi track_only không
     def is_tracked_by_only_rules(self, path):
-        """Check if a path is allowed by track_only.txt rules."""
+        """Check if a path is allowed by track_only rules."""
         if not self.has_user_defined_only_rules:
-            return True  # Nếu chỉ có '*', cho phép tất cả
+            return True
         path_str = self._normalize_path(path)
         return self.track_only_spec.match_file(path_str)
 
@@ -152,31 +151,15 @@ class IgnoreRules:
 
     def get_rule_summary(self):
         """Get a summary of all rules for reporting"""
-        # CẬP NHẬT: Thêm 'track_only' vào summary
         rules_info = {
             'gitignore': {
                 'found': self.gitignore_found,
                 'patterns': self.gitignore_patterns
             },
-            'track_ignore': {
-                'found': self.track_ignore_found,
-                'patterns': self.track_ignore_patterns
-            },
-            'track_only': {
-                'found': self.track_only_found,
-                'patterns': self.track_only_patterns
-            },
-            'default': {
-                'patterns': self.default_patterns
-            }
+            'settings': self.settings
         }
         return rules_info
 
-    def get_track_ignore_path(self):
-        """Return the path to the track_ignore.txt file"""
-        return self.codebase_dir / TRACK_IGNORE_FILENAME
-
-    # MỚI: Lấy đường dẫn tới file track_only.txt
-    def get_track_only_path(self):
-        """Return the path to the track_only.txt file"""
-        return self.codebase_dir / TRACK_ONLY_FILENAME
+    def get_settings_path(self):
+        """Return the path to the settings file"""
+        return self.settings_path

@@ -45,18 +45,21 @@ class CodebaseTrackerUI:
         self.root.title("Codebase Tracker")
 
         initial_width = 720
-        initial_height = 520
-        self.root.geometry(f"{initial_width}x{initial_height}")
+        # initial_height = 520 # Removed fixed height
+        # self.root.geometry(f"{initial_width}x{initial_height}")
 
         self.root.update_idletasks()
         screen_width = self.root.winfo_screenwidth()
         screen_height = self.root.winfo_screenheight()
         margin = 60
         x = screen_width - initial_width - margin
-        y = (screen_height - initial_height) // 2
-        self.root.geometry(f'{initial_width}x{initial_height}+{x}+{y}')
+        y = (screen_height - 500) // 2 # Approximate center
+        self.root.geometry(f"+{x}+{y}") # Set position only, let size be determined by content
+        
+        # Allow height to adjust automatically if needed, but start with reasonable size
+        # self.root.geometry(f"+{x}+{y}") 
 
-        self.root.minsize(680, 500)
+        self.root.minsize(680, 400)
         self.root.configure(bg=BACKGROUND_COLOR)
 
         self.project_path = None
@@ -148,14 +151,13 @@ class CodebaseTrackerUI:
 
         self.cancel_btn = ttk.Button(actions_frame, text="Cancel", style="Cancel.TButton", command=self._on_cancel)
 
-        # MỚI: Thêm nút Edit track_only.txt
-        self.edit_only_btn = ttk.Button(actions_frame, text="Edit track_only.txt", style="Secondary.TButton",
-                                        command=self._edit_track_only, state=tk.DISABLED)
-        self.edit_only_btn.grid(row=0, column=1, sticky="ew", padx=(10, 5))
+        self.edit_settings_btn = ttk.Button(actions_frame, text="Edit Settings", style="Secondary.TButton",
+                                        command=self._edit_settings, state=tk.DISABLED)
+        self.edit_settings_btn.grid(row=0, column=1, sticky="ew", padx=(10, 5))
 
-        self.edit_ignore_btn = ttk.Button(actions_frame, text="Edit track_ignore.txt", style="Secondary.TButton",
-                                          command=self._edit_track_ignore, state=tk.DISABLED)
-        self.edit_ignore_btn.grid(row=0, column=2, sticky="ew")
+        self.reset_settings_btn = ttk.Button(actions_frame, text="Reset Settings", style="Secondary.TButton",
+                                          command=self._reset_settings, state=tk.DISABLED)
+        self.reset_settings_btn.grid(row=0, column=2, sticky="ew")
 
         status_frame = ttk.LabelFrame(main_frame, text="Status", padding="10")
         status_frame.pack(fill=tk.X, pady=(0, 10))
@@ -207,16 +209,16 @@ class CodebaseTrackerUI:
             self.project_path = path
             self.status_var.set(f"Project path is valid. Ready to scan.")
             self.scan_btn.config(state=tk.NORMAL)
-            self.edit_ignore_btn.config(state=tk.NORMAL)
-            self.edit_only_btn.config(state=tk.NORMAL)  # MỚI: Bật nút
+            self.edit_settings_btn.config(state=tk.NORMAL)
+            self.reset_settings_btn.config(state=tk.NORMAL)
             self._add_to_gitignore(path)
         else:
             self.project_path = None
             if path:
                 self.status_var.set("Invalid path. Please provide a valid project folder.")
             self.scan_btn.config(state=tk.DISABLED)
-            self.edit_ignore_btn.config(state=tk.DISABLED)
-            self.edit_only_btn.config(state=tk.DISABLED)  # MỚI: Tắt nút
+            self.edit_settings_btn.config(state=tk.DISABLED)
+            self.reset_settings_btn.config(state=tk.DISABLED)
 
     def _on_cancel(self):
         if self.worker_thread and self.worker_thread.is_alive():
@@ -238,8 +240,8 @@ class CodebaseTrackerUI:
         self.scan_btn.grid_remove()
         self.cancel_btn.grid(row=0, column=0, sticky="ew")
         self.cancel_btn.config(state=tk.NORMAL, text="Cancel")
-        self.edit_ignore_btn.config(state=tk.DISABLED)
-        self.edit_only_btn.config(state=tk.DISABLED)  # MỚI: Tắt nút khi đang chạy
+        self.edit_settings_btn.config(state=tk.DISABLED)
+        self.reset_settings_btn.config(state=tk.DISABLED)
         self.path_entry.config(state=tk.DISABLED)
 
         self.worker_thread = threading.Thread(target=self._process_project)
@@ -452,20 +454,25 @@ class CodebaseTrackerUI:
         if output_dir:
             self._open_path(os.path.dirname(output_dir))
 
-    def _edit_track_ignore(self):
+    def _edit_settings(self):
         if not self.project_path:
             messagebox.showerror("Error", "Please select a project folder first")
             return
         scanner = FileScanner(self.project_path)
-        track_ignore_path = scanner.ignore_rules.get_track_ignore_path()
-        self._open_path(track_ignore_path)
+        settings_path = scanner.ignore_rules.get_settings_path()
+        self._open_path(settings_path)
 
-    # MỚI: Hàm để mở file track_only.txt
-    def _edit_track_only(self):
+    def _reset_settings(self):
         if not self.project_path:
             messagebox.showerror("Error", "Please select a project folder first")
             return
-        # Tạo scanner tạm để lấy đường dẫn file một cách an toàn
-        scanner = FileScanner(self.project_path)
-        track_only_path = scanner.ignore_rules.get_track_only_path()
-        self._open_path(track_only_path)
+        
+        if messagebox.askyesno("Reset Settings", "Are you sure you want to reset settings to default? This will overwrite your current configuration."):
+            try:
+                scanner = FileScanner(self.project_path)
+                scanner.ignore_rules.reset_settings()
+                messagebox.showinfo("Success", "Settings have been reset to default.")
+                # Optionally open the file to show it's reset
+                self._edit_settings()
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to reset settings: {e}")

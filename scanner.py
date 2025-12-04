@@ -46,7 +46,7 @@ class FileScanner:
         ignored_items = []
         processed_paths = set()
 
-        only_patterns = self.ignore_rules.track_only_patterns
+        only_patterns = self.ignore_rules.settings.get("track_only", ["*"])
         use_ordered_scan = self.ignore_rules.has_user_defined_only_rules
 
         if use_ordered_scan:
