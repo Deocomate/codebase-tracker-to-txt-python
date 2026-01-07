@@ -300,68 +300,49 @@ class CodebaseTrackerUI:
         if not stats:
             return
 
-        self.structure_path_var = None
-
+        # Info Frame
         info_frame = ttk.Frame(self.results_frame)
         info_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        summary_text = stats.get('summary', 'Process completed.')
+        ttk.Label(info_frame, text=summary_text, font=FONT_BOLD, wraplength=600).pack(anchor="w")
+        
+        # Additional stats
+        stats_text = f"Total Files: {stats.get('total_files_included', 0)}   |   Ignored: {stats.get('ignored_items', 0)}   |   Chars: {stats.get('total_chars', 0):,}"
+        ttk.Label(info_frame, text=stats_text, font=FONT_NORMAL).pack(anchor="w", pady=(5, 0))
 
-        stats_text = f"Text Files: {stats.get('text_files', 0)}   | Ignored: {stats.get('ignored_items', 0)}   |   Chars: {stats.get('total_chars', 0):,}"
-        ttk.Label(info_frame, text=stats_text, font=FONT_BOLD).pack(side=tk.LEFT)
-        if stats.get('errors', 0) > 0:
-            ttk.Label(info_frame, text=f"   Errors: {stats['errors']}", font=FONT_BOLD, foreground="red").pack(
-                side=tk.LEFT)
+        # List of generated files
+        files_frame = ttk.LabelFrame(self.results_frame, text="Generated Files", padding="5")
+        files_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+        
+        files_listbox = tk.Listbox(files_frame, height=5, relief=tk.FLAT, bg=BACKGROUND_COLOR)
+        scrollbar = ttk.Scrollbar(files_frame, orient="vertical", command=files_listbox.yview)
+        files_listbox.configure(yscrollcommand=scrollbar.set)
+        
+        files_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        for f in stats.get('generated_files', []):
+            files_listbox.insert(tk.END, f"• {f}")
 
-        # Output File Path
-        output_path_frame = ttk.Frame(self.results_frame)
-        output_path_frame.pack(fill=tk.X, pady=(5, 5))
-        output_path_frame.columnconfigure(0, weight=1)
-
-        self.output_path_var = tk.StringVar(value=stats.get('output_file', ''))
-        path_display_entry = ttk.Entry(output_path_frame, textvariable=self.output_path_var, state="readonly",
-                                       font=FONT_NORMAL)
-        path_display_entry.grid(row=0, column=0, sticky="ew")
-
-        copy_path_btn = ttk.Button(output_path_frame, text="Copy Path", style="Small.Secondary.TButton",
-                                   command=self._copy_output_path)
-        copy_path_btn.grid(row=0, column=1, sticky="e", padx=(8, 0))
-
-        # Structure File Path
-        structure_path = stats.get('structure_file')
-        if structure_path:
-            structure_frame = ttk.Frame(self.results_frame)
-            structure_frame.pack(fill=tk.X, pady=(0, 10))
-            structure_frame.columnconfigure(0, weight=1)
-
-            self.structure_path_var = tk.StringVar(value=structure_path)
-            structure_entry = ttk.Entry(structure_frame, textvariable=self.structure_path_var, state="readonly",
-                                       font=FONT_NORMAL)
-            structure_entry.grid(row=0, column=0, sticky="ew")
-
-            copy_structure_btn = ttk.Button(structure_frame, text="Copy Structure Path", style="Small.Secondary.TButton",
-                                           command=self._copy_structure_path)
-            copy_structure_btn.grid(row=0, column=1, sticky="e", padx=(8, 0))
-
+        # Buttons Frame
         btn_frame = ttk.Frame(self.results_frame)
-        btn_frame.pack(fill=tk.X, pady=(5, 0))
+        btn_frame.pack(fill=tk.X, pady=(10, 0))
 
-        if WINDOWS_COPY_SUPPORT:
-            self.copy_file_btn = ttk.Button(btn_frame, text="Copy File", style="Success.TButton",
-                                            command=self._copy_file_to_clipboard)
-            self.copy_file_btn.pack(side=tk.LEFT, padx=(0, 5), fill=tk.X, expand=True)
+        # Open Folder Button (Primary action)
+        self.output_dir = stats.get('output_dir')
+        open_dir_btn = ttk.Button(btn_frame, text="Open Output Folder", style="Success.TButton", 
+                                 command=self._open_output_dir)
+        open_dir_btn.pack(side=tk.LEFT, padx=(0, 5), fill=tk.X, expand=True)
 
-        open_file_btn = ttk.Button(btn_frame, text="Open File", style="Secondary.TButton",
-                                   command=self._open_output_file)
-        open_file_btn.pack(side=tk.LEFT, padx=(0, 5))
+        # Edit Settings
+        edit_btn = ttk.Button(btn_frame, text="Check Settings", style="Secondary.TButton", 
+                             command=self._edit_settings)
+        edit_btn.pack(side=tk.LEFT, padx=(0, 5))
 
-        if structure_path:
-            open_structure_btn = ttk.Button(btn_frame, text="Open Structure", style="Secondary.TButton",
-                                           command=self._open_structure_file)
-            open_structure_btn.pack(side=tk.LEFT, padx=(0, 5))
-
-        open_dir_btn = ttk.Button(btn_frame, text="Open Dir", style="Secondary.TButton", command=self._open_output_dir)
-        open_dir_btn.pack(side=tk.LEFT, padx=(0, 5))
-
-        clear_btn = ttk.Button(btn_frame, text="Clear Output", style="Secondary.TButton", command=self._clear_output)
+        # Clear Output
+        clear_btn = ttk.Button(btn_frame, text="Clear", style="Secondary.TButton", 
+                              command=self._clear_output)
         clear_btn.pack(side=tk.LEFT)
 
         self.results_frame.pack(fill=tk.BOTH, pady=(10, 0), expand=True)
@@ -450,9 +431,12 @@ class CodebaseTrackerUI:
             self._open_path(structure_file)
 
     def _open_output_dir(self):
-        output_dir = self.output_stats.get('output_file')
-        if output_dir:
-            self._open_path(os.path.dirname(output_dir))
+        # Mở thư mục _codebase
+        if hasattr(self, 'output_dir') and self.output_dir:
+            self._open_path(self.output_dir)
+        elif self.project_path:
+            path = os.path.join(self.project_path, '_codebase')
+            self._open_path(path)
 
     def _edit_settings(self):
         if not self.project_path:
