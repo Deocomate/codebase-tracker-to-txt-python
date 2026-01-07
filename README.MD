@@ -1,266 +1,163 @@
 # Codebase Tracker
 
-![Codebase Tracker Logo](icon.png)
-
-## Tổng quan
-
-**Codebase Tracker** là một công cụ Python mạnh mẽ với giao diện đồ họa (GUI) hiện đại, giúp bạn quét, phân tích và gộp toàn bộ mã nguồn dự án thành một tệp văn bản duy nhất. Công cụ này được thiết kế đặc biệt để tối ưu hóa quy trình làm việc với các mô hình AI như ChatGPT, Claude, Gemini, giúp AI hiểu sâu và toàn diện về cấu trúc cũng như nội dung dự án của bạn.
-
-## 🌟 Tính năng nổi bật
-
-*   **Giao diện hiện đại & Dễ sử dụng**: Hỗ trợ Kéo & Thả (Drag & Drop) thư mục dự án trực tiếp vào ứng dụng.
-*   **Gộp mã nguồn thông minh**: Tự động quét và gộp nội dung của tất cả các tệp văn bản vào `codebase.txt`.
-*   **Cây thư mục trực quan**: Tạo sơ đồ cấu trúc thư mục giúp AI dễ dàng hình dung tổ chức dự án.
-*   **Hệ thống Cấu hình linh hoạt**:
-    *   Tự động tuân thủ `.gitignore`.
-    *   Quản lý tập trung qua `codebase_tracker_settings.json`.
-    *   Hỗ trợ chế độ `track_only` (chỉ quét file chỉ định) và `ignore_patterns` (bỏ qua file).
-    *   Tự động phát hiện và bỏ qua các tệp nhị phân (binary files).
-*   **Thống kê & Báo cáo**: Hiển thị số lượng file, tổng dung lượng và các file bị bỏ qua.
-*   **Sao chép nhanh**: Tính năng "Copy to Clipboard" giúp đưa toàn bộ context vào AI chỉ với một cú click.
-
-## 🚀 Cài đặt
-
-### Yêu cầu hệ thống
-*   **Python**: Phiên bản 3.7 trở lên (Khuyến nghị 3.9+).
-*   **Git**: Để clone mã nguồn.
-*   **Hệ điều hành**: Windows 10+, macOS 10.14+, Ubuntu 18.04+ (và các distro Linux khác).
-
-### 1. Windows
-
-**Cách 1: Chạy từ mã nguồn (Khuyến nghị cho Developer)**
-
-1.  Mở Command Prompt (cmd) hoặc PowerShell.
-2.  Clone repository:
-    ```bash
-    git clone https://github.com/your-username/codebase-tracker-to-txt-python.git
-    cd codebase-tracker-to-txt-python
-    ```
-3.  Tạo và kích hoạt môi trường ảo (tùy chọn nhưng khuyến nghị):
-    ```bash
-    python -m venv venv
-    .\venv\Scripts\activate
-    ```
-4.  Cài đặt các thư viện cần thiết:
-    ```bash
-    pip install -r requirements.txt
-    ```
-5.  Chạy ứng dụng:
-    ```bash
-    python main.py
-    ```
-
-**Cách 2: Sử dụng file thực thi (.exe)**
-*   Tải file `.exe` mới nhất từ mục [Releases](https://github.com/your-username/codebase-tracker-to-txt-python/releases).
-*   Chạy trực tiếp không cần cài đặt Python.
+<div align="center">
+  <img src="icon.png" alt="Codebase Tracker Logo" width="128">
+  
+  **Quét và gộp mã nguồn thành văn bản tối ưu cho AI**
+  
+  [![Python](https://img.shields.io/badge/Python-3.7+-blue.svg)](https://python.org)
+  [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+  [![Platform](https://img.shields.io/badge/Platform-Windows%20|%20macOS%20|%20Linux-lightgrey.svg)]()
+</div>
 
 ---
 
-### 2. macOS
+## 📋 Tổng quan
 
-1.  Mở Terminal.
-2.  Cài đặt Python 3 và Git (nếu chưa có) qua Homebrew:
-    ```bash
-    brew install python git
-    ```
-3.  Cài đặt `python-tk` (cần thiết cho giao diện):
-    ```bash
-    brew install python-tk
-    ```
-4.  Clone repository:
-    ```bash
-    git clone https://github.com/your-username/codebase-tracker-to-txt-python.git
-    cd codebase-tracker-to-txt-python
-    ```
-5.  Tạo và kích hoạt môi trường ảo:
-    ```bash
-    python3 -m venv venv
-    source venv/bin/activate
-    ```
-6.  Cài đặt thư viện:
-    ```bash
-    pip install -r requirements.txt
-    ```
-7.  Chạy ứng dụng:
-    ```bash
-    python3 main.py
-    ```
+**Codebase Tracker** là công cụ Python với GUI hiện đại, giúp quét và gộp toàn bộ mã nguồn dự án thành file văn bản được tối ưu cho các AI như ChatGPT, Claude, Gemini.
+
+### Tính năng chính
+
+- 🖱️ **Drag & Drop** - Kéo thả thư mục trực tiếp vào ứng dụng
+- 📁 **Multi-output** - Tạo nhiều file output theo cấu hình
+- 🌳 **Cây thư mục** - Tự động tạo sơ đồ cấu trúc dự án
+- ⚡ **Tối ưu token** - Output gọn gàng, tiết kiệm token cho AI
+- 🔧 **Cấu hình linh hoạt** - Hỗ trợ `.gitignore` và custom patterns
 
 ---
 
-### 3. Linux (Ubuntu/Debian/Fedora)
+## 🚀 Cài đặt nhanh
 
-1.  Mở Terminal.
-2.  Cài đặt Python 3, Git và Tkinter:
-    *   **Ubuntu/Debian**:
-        ```bash
-        sudo apt update
-        sudo apt install python3 python3-pip python3-venv python3-tk git
-        ```
-    *   **Fedora**:
-        ```bash
-        sudo dnf install python3 python3-pip python3-tkinter git
-        ```
-3.  Clone repository:
-    ```bash
-    git clone https://github.com/your-username/codebase-tracker-to-txt-python.git
-    cd codebase-tracker-to-txt-python
-    ```
-4.  Tạo và kích hoạt môi trường ảo:
-    ```bash
-    python3 -m venv venv
-    source venv/bin/activate
-    ```
-5.  Cài đặt thư viện:
-    ```bash
-    pip install -r requirements.txt
-    ```
-6.  Chạy ứng dụng:
-    ```bash
-    python3 main.py
-    ```
+### Yêu cầu
+
+- Python 3.7+ (khuyến nghị 3.9+)
+- Git
+
+### Cài đặt
+
+```bash
+# Clone repository
+git clone https://github.com/your-username/codebase-tracker-to-txt-python.git
+cd codebase-tracker-to-txt-python
+
+# Tạo môi trường ảo
+python3 -m venv venv
+source venv/bin/activate  # Windows: .\venv\Scripts\activate
+
+# Cài đặt dependencies
+pip install -r requirements.txt
+
+# Chạy ứng dụng
+python3 main.py
+```
+
+<details>
+<summary><b>📦 Sử dụng file thực thi (không cần Python)</b></summary>
+
+Tải file `.exe` / `.app` từ [Releases](https://github.com/your-username/codebase-tracker-to-txt-python/releases).
+
+</details>
+
+<details>
+<summary><b>🐧 Hướng dẫn cài đặt chi tiết cho Linux</b></summary>
+
+**Ubuntu/Debian:**
+```bash
+sudo apt update
+sudo apt install python3 python3-pip python3-venv python3-tk git
+```
+
+**Fedora:**
+```bash
+sudo dnf install python3 python3-pip python3-tkinter git
+```
+
+</details>
+
+---
 
 ## 📖 Hướng dẫn sử dụng
 
-1.  **Khởi động ứng dụng**: Chạy `python main.py`.
-2.  **Chọn dự án**:
-    *   Kéo thả thư mục dự án vào cửa sổ ứng dụng.
-    *   Hoặc nhấn **"Browse Folder..."** để chọn.
-3.  **Quét & Gộp**: Nhấn **"Scan & Generate"**. Ứng dụng sẽ xử lý và hiển thị tiến trình.
-4.  **Kết quả**:
-    *   Nhấn **"Copy to Clipboard"** để sao chép toàn bộ nội dung.
-    *   File kết quả `codebase.txt` (nội dung mã nguồn) và `codebase_structure.txt` (cấu trúc thư mục) sẽ được lưu trong thư mục `_codebase/` bên trong dự án của bạn.
-    *   Bạn có thể mở nhanh file hoặc thư mục kết quả bằng các nút tương ứng.
+1. **Khởi động** - Chạy `python3 main.py`
+2. **Chọn dự án** - Kéo thả hoặc Browse thư mục
+3. **Scan & Generate** - Nhấn nút để bắt đầu
+4. **Kết quả** - Mở thư mục `_codebase/` để lấy file output
 
-## ⚙️ Cấu hình (Configuration)
+### Output Files
 
-Ứng dụng sử dụng file `_codebase/codebase_tracker_settings.json` để quản lý các quy tắc quét. File này sẽ tự động được tạo khi bạn chọn dự án.
+| File | Mô tả |
+|------|-------|
+| `codebase_structure.txt` | Cây thư mục dự án |
+| `{config}.txt` | Nội dung source code |
 
-**Cấu trúc file:**
+---
+
+## ⚙️ Cấu hình
+
+Ứng dụng sử dụng `_codebase/settings.json` để quản lý quy tắc quét:
+
 ```json
 {
-    "track_only": ["*"],          // Danh sách file/folder CẦN quét (Allow-list). Mặc định "*" là tất cả.
-    "ignore_patterns": [          // Danh sách file/folder CẦN BỎ QUA (Deny-list).
-        ".git/",
-        "node_modules/",
-        "*.log"
-    ]
+  "track_config": [
+    {
+      "name": "codebase",
+      "tracks": ["*"],
+      "ignore_patterns": []
+    }
+  ],
+  "global_ignore_patterns": [
+    ".git/", "node_modules/", "dist/", "*.log"
+  ]
 }
 ```
 
-**Các nút chức năng:**
-*   **Edit Settings**: Mở file cấu hình JSON để chỉnh sửa.
-*   **Reset Settings**: Khôi phục cấu hình về mặc định.
+📄 **Chi tiết:** [docs/CONFIGURATION.md](docs/CONFIGURATION.md)
 
 ---
 
-## 🛠️ Xây dựng file thực thi (Build)
+## 🏗️ Cấu trúc dự án
 
-Nếu bạn muốn đóng gói ứng dụng thành file chạy độc lập:
+```
+codebase-tracker-to-txt-python/
+├── main.py                 # Entry point
+├── app/
+│   ├── core/               # Business logic
+│   │   ├── scanner.py      # File scanning
+│   │   ├── combiner.py     # Content combining
+│   │   ├── processor.py    # Processing orchestration
+│   │   └── ignore_rules.py # Pattern matching
+│   ├── utils/              # Utilities
+│   │   └── file_utils.py   # File type detection
+│   └── gui/                # User interface
+│       └── ui.py           # Tkinter GUI
+├── docs/                   # Documentation
+│   ├── BUILD.md            # Build instructions
+│   └── CONFIGURATION.md    # Configuration guide
+└── requirements.txt        # Dependencies
+```
 
-### Chuẩn bị
+---
 
+## 🛠️ Build
+
+Đóng gói ứng dụng thành file thực thi độc lập.
+
+📄 **Hướng dẫn chi tiết:** [docs/BUILD.md](docs/BUILD.md)
+
+**Quick build (macOS):**
 ```bash
 pip install pyinstaller
-```
-
-### Build cho Windows
-
-```bash
-pyinstaller --name "Codebase Tracker" --onefile --windowed --icon=icon.ico --add-data "icon.ico;." --add-data "icon.png;." --collect-all tkinterdnd2 main.py
-```
-
-File `.exe` sẽ được tạo trong thư mục `dist/`.
-
----
-
-### Build cho macOS
-
-#### Bước 1: Tạo file icon `.icns` (nếu chưa có)
-
-macOS yêu cầu file `.icns` để hiển thị icon trong Finder và Dock. Chạy lệnh sau:
-
-```bash
-# Tạo iconset folder với các kích thước cần thiết
-mkdir -p icon.iconset
-sips -z 16 16     icon.png --out icon.iconset/icon_16x16.png
-sips -z 32 32     icon.png --out icon.iconset/icon_16x16@2x.png
-sips -z 32 32     icon.png --out icon.iconset/icon_32x32.png
-sips -z 64 64     icon.png --out icon.iconset/icon_32x32@2x.png
-sips -z 128 128   icon.png --out icon.iconset/icon_128x128.png
-sips -z 256 256   icon.png --out icon.iconset/icon_128x128@2x.png
-sips -z 256 256   icon.png --out icon.iconset/icon_256x256.png
-sips -z 512 512   icon.png --out icon.iconset/icon_256x256@2x.png
-sips -z 512 512   icon.png --out icon.iconset/icon_512x512.png
-sips -z 1024 1024 icon.png --out icon.iconset/icon_512x512@2x.png
-
-# Chuyển đổi iconset thành file .icns
-iconutil -c icns icon.iconset
-
-# Dọn dẹp (tuỳ chọn)
-rm -rf icon.iconset
-```
-
-> **Lưu ý**: File `icon.icns` đã được bao gồm sẵn trong repository, bạn chỉ cần chạy bước này nếu muốn tạo lại icon từ file `icon.png` mới.
-
-#### Bước 2: Build ứng dụng
-
-**Cách 1: Sử dụng file `.spec` có sẵn (Khuyến nghị)**
-
-```bash
 pyinstaller "Codebase Tracker.spec" --clean
 ```
 
-**Cách 2: Build thủ công bằng lệnh**
+---
 
-```bash
-pyinstaller --name "Codebase Tracker" \
-    --onefile \
-    --windowed \
-    --icon=icon.icns \
-    --add-data "icon.png:." \
-    --add-data "icon.icns:." \
-    --osx-bundle-identifier "com.minhlong.codebasetracker" \
-    --collect-all tkinterdnd2 \
-    main.py
-```
+## 📄 License
 
-> **Lưu ý**: Trên macOS, dùng dấu hai chấm `:` để ngăn cách trong `--add-data` (Windows dùng dấu chấm phẩy `;`).
-
-#### Bước 3: Kiểm tra kết quả
-
-File `.app` sẽ được tạo trong thư mục `dist/Codebase Tracker.app`. Bạn có thể:
-
-1. **Kéo thả vào Applications**: Di chuyển `Codebase Tracker.app` vào thư mục `/Applications` để cài đặt.
-2. **Chạy trực tiếp**: Double-click vào file `.app` trong Finder.
+MIT License - Xem file [LICENSE](LICENSE) để biết thêm chi tiết.
 
 ---
 
-### Build cho Linux
-
-```bash
-pyinstaller --name "Codebase Tracker" --onefile --windowed --add-data "icon.png:." --collect-all tkinterdnd2 main.py
-```
-
-File thực thi sẽ được tạo trong thư mục `dist/`.
-
----
-
-### Xử lý lỗi thường gặp
-
-| Lỗi | Giải pháp |
-|-----|-----------|
-| `ModuleNotFoundError: tkinterdnd2` | Cài đặt: `pip install tkinterdnd2` |
-| Icon không hiển thị trên macOS | Đảm bảo đã tạo file `icon.icns` và sử dụng file `.spec` có cấu hình đúng |
-| App bị block bởi Gatekeeper (macOS) | Chuột phải → Open → Open lần đầu, hoặc xoá extended attributes: `xattr -cr "dist/Codebase Tracker.app"` |
-| Permission denied (Linux) | Cấp quyền thực thi: `chmod +x "dist/Codebase Tracker"` |
-
----
-
-## 📄 Giấy phép
-
-Dự án này được phân phối dưới giấy phép **MIT License**. Xem file `LICENSE` để biết thêm chi tiết.
-
----
-
-Phát triển bởi Minh Long | © 2025 - Codebase Tracker
+<div align="center">
+  Phát triển bởi <b>Minh Long</b> | © 2025
+</div>

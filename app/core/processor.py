@@ -1,6 +1,6 @@
 import threading
-from scanner import FileScanner
-from combiner import FileCombiner
+from app.core.scanner import FileScanner
+from app.core.combiner import FileCombiner
 
 
 class ProjectProcessor:
@@ -10,9 +10,9 @@ class ProjectProcessor:
         self.combiner = FileCombiner(project_path)
 
     def run(self, scan_callback, combine_callback, cancel_event: threading.Event):
+        """Run the full scan and combine process."""
         try:
             scan_callback("Scanning project files...", 0)
-            # Note: categorized_files is a Dict now
             categorized_files, ignored_items, all_files = self.scanner.scan(
                 callback=scan_callback,
                 cancel_event=cancel_event
@@ -26,7 +26,7 @@ class ProjectProcessor:
             
             combine_callback("Combining files...", 0.5)
             success, message, stats = self.combiner.combine(
-                categorized_files,  # Pass the dict
+                categorized_files,
                 ignored_items,
                 self.scanner.ignore_rules, 
                 all_files,

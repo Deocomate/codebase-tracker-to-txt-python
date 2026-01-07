@@ -1,12 +1,11 @@
 import os
 import mimetypes
 from tkinterdnd2 import TkinterDnD
-from ui import CodebaseTrackerUI
+from app.gui.ui import CodebaseTrackerUI
 
 
 def main():
     mimetypes.init()
-
     root = TkinterDnD.Tk()
 
     try:
