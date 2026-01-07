@@ -1,6 +1,6 @@
 # Codebase Tracker
 
-![Codebase Tracker Logo](icon.ico)
+![Codebase Tracker Logo](icon.png)
 
 ## Tổng quan
 
@@ -152,24 +152,110 @@
 *   **Edit Settings**: Mở file cấu hình JSON để chỉnh sửa.
 *   **Reset Settings**: Khôi phục cấu hình về mặc định.
 
+---
+
 ## 🛠️ Xây dựng file thực thi (Build)
 
 Nếu bạn muốn đóng gói ứng dụng thành file chạy độc lập:
 
-1.  Cài đặt PyInstaller:
-    ```bash
-    pip install pyinstaller
-    ```
-2.  Chạy lệnh build:
-    *   **Windows**:
-        ```bash
-        pyinstaller --name "Codebase Tracker" --onefile --windowed --icon=icon.ico --add-data "icon.ico;." --collect-all tkinterdnd2 main.py
-        ```
-    *   **Linux/macOS**:
-        ```bash
-        pyinstaller --name "Codebase Tracker" --onefile --windowed --add-data "icon.png:." --collect-all tkinterdnd2 main.py
-        ```
-    *(Lưu ý: Trên Linux/macOS dùng dấu hai chấm `:` để ngăn cách trong `--add-data`, Windows dùng dấu chấm phẩy `;`)*
+### Chuẩn bị
+
+```bash
+pip install pyinstaller
+```
+
+### Build cho Windows
+
+```bash
+pyinstaller --name "Codebase Tracker" --onefile --windowed --icon=icon.ico --add-data "icon.ico;." --add-data "icon.png;." --collect-all tkinterdnd2 main.py
+```
+
+File `.exe` sẽ được tạo trong thư mục `dist/`.
+
+---
+
+### Build cho macOS
+
+#### Bước 1: Tạo file icon `.icns` (nếu chưa có)
+
+macOS yêu cầu file `.icns` để hiển thị icon trong Finder và Dock. Chạy lệnh sau:
+
+```bash
+# Tạo iconset folder với các kích thước cần thiết
+mkdir -p icon.iconset
+sips -z 16 16     icon.png --out icon.iconset/icon_16x16.png
+sips -z 32 32     icon.png --out icon.iconset/icon_16x16@2x.png
+sips -z 32 32     icon.png --out icon.iconset/icon_32x32.png
+sips -z 64 64     icon.png --out icon.iconset/icon_32x32@2x.png
+sips -z 128 128   icon.png --out icon.iconset/icon_128x128.png
+sips -z 256 256   icon.png --out icon.iconset/icon_128x128@2x.png
+sips -z 256 256   icon.png --out icon.iconset/icon_256x256.png
+sips -z 512 512   icon.png --out icon.iconset/icon_256x256@2x.png
+sips -z 512 512   icon.png --out icon.iconset/icon_512x512.png
+sips -z 1024 1024 icon.png --out icon.iconset/icon_512x512@2x.png
+
+# Chuyển đổi iconset thành file .icns
+iconutil -c icns icon.iconset
+
+# Dọn dẹp (tuỳ chọn)
+rm -rf icon.iconset
+```
+
+> **Lưu ý**: File `icon.icns` đã được bao gồm sẵn trong repository, bạn chỉ cần chạy bước này nếu muốn tạo lại icon từ file `icon.png` mới.
+
+#### Bước 2: Build ứng dụng
+
+**Cách 1: Sử dụng file `.spec` có sẵn (Khuyến nghị)**
+
+```bash
+pyinstaller "Codebase Tracker.spec" --clean
+```
+
+**Cách 2: Build thủ công bằng lệnh**
+
+```bash
+pyinstaller --name "Codebase Tracker" \
+    --onefile \
+    --windowed \
+    --icon=icon.icns \
+    --add-data "icon.png:." \
+    --add-data "icon.icns:." \
+    --osx-bundle-identifier "com.minhlong.codebasetracker" \
+    --collect-all tkinterdnd2 \
+    main.py
+```
+
+> **Lưu ý**: Trên macOS, dùng dấu hai chấm `:` để ngăn cách trong `--add-data` (Windows dùng dấu chấm phẩy `;`).
+
+#### Bước 3: Kiểm tra kết quả
+
+File `.app` sẽ được tạo trong thư mục `dist/Codebase Tracker.app`. Bạn có thể:
+
+1. **Kéo thả vào Applications**: Di chuyển `Codebase Tracker.app` vào thư mục `/Applications` để cài đặt.
+2. **Chạy trực tiếp**: Double-click vào file `.app` trong Finder.
+
+---
+
+### Build cho Linux
+
+```bash
+pyinstaller --name "Codebase Tracker" --onefile --windowed --add-data "icon.png:." --collect-all tkinterdnd2 main.py
+```
+
+File thực thi sẽ được tạo trong thư mục `dist/`.
+
+---
+
+### Xử lý lỗi thường gặp
+
+| Lỗi | Giải pháp |
+|-----|-----------|
+| `ModuleNotFoundError: tkinterdnd2` | Cài đặt: `pip install tkinterdnd2` |
+| Icon không hiển thị trên macOS | Đảm bảo đã tạo file `icon.icns` và sử dụng file `.spec` có cấu hình đúng |
+| App bị block bởi Gatekeeper (macOS) | Chuột phải → Open → Open lần đầu, hoặc xoá extended attributes: `xattr -cr "dist/Codebase Tracker.app"` |
+| Permission denied (Linux) | Cấp quyền thực thi: `chmod +x "dist/Codebase Tracker"` |
+
+---
 
 ## 📄 Giấy phép
 
