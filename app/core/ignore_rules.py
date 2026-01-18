@@ -5,7 +5,6 @@ from pathlib import Path
 from app.utils.file_utils import ensure_directory
 
 SETTINGS_FILENAME = "settings.json"
-
 DEFAULT_SETTINGS = {
     "track_config": [
         {
@@ -24,7 +23,6 @@ DEFAULT_SETTINGS = {
     "description": "Configure multiple output files based on track patterns."
 }
 
-
 class IgnoreRules:
     def __init__(self, project_path):
         self.project_path = Path(project_path).absolute()
@@ -34,6 +32,7 @@ class IgnoreRules:
         self.gitignore_patterns = []
         self.global_ignore_spec = None
         self.configs = {}
+        
         self.settings = DEFAULT_SETTINGS.copy()
         
         ensure_directory(self.codebase_dir)
@@ -47,8 +46,8 @@ class IgnoreRules:
         if gitignore_path.exists() and gitignore_path.is_file():
             try:
                 with open(gitignore_path, 'r', encoding='utf-8') as f:
-                    lines = f.read().splitlines()
-                self.gitignore_patterns = [l for l in lines if l.strip() and not l.strip().startswith('#')]
+                    # PathSpec handles comments and empty lines automatically
+                    self.gitignore_patterns = f.read().splitlines()
             except Exception as e:
                 print(f"Error loading .gitignore: {e}")
 
@@ -56,6 +55,7 @@ class IgnoreRules:
         try:
             if not self.settings_path.exists():
                 self._create_default_settings()
+            
             with open(self.settings_path, 'r', encoding='utf-8') as f:
                 loaded = json.load(f)
                 self.settings.update(loaded)
@@ -76,7 +76,9 @@ class IgnoreRules:
         self._compile_rules()
 
     def _compile_rules(self):
-        """Compile pathspecs from settings."""
+        """Compile pathspecs from settings using gitwildmatch logic."""
+        # Combine gitignore and global settings
+        # Git logic: Order matters, but PathSpec handles the composite list effectively
         global_patterns = self.gitignore_patterns + self.settings.get("global_ignore_patterns", [])
         self.global_ignore_spec = pathspec.PathSpec.from_lines('gitwildmatch', global_patterns)
 
@@ -92,31 +94,55 @@ class IgnoreRules:
             }
 
     def _normalize_path(self, path):
+        """
+        Convert path to POSIX style (forward slashes) relative to project root.
+        """
         if isinstance(path, Path):
             try:
-                rel_path = path.relative_to(self.project_path) if path.is_absolute() else path
-                return str(rel_path).replace('\\', '/')
+                # If path is absolute, make it relative
+                if path.is_absolute():
+                    rel_path = path.relative_to(self.project_path)
+                    return str(rel_path).replace(os.sep, '/')
+                return str(path).replace(os.sep, '/')
             except ValueError:
-                return str(path).replace('\\', '/')
-        return path.replace('\\', '/')
+                # Path is not inside project_path
+                return str(path).replace(os.sep, '/')
+        return str(path).replace(os.sep, '/')
 
-    def is_globally_ignored(self, path):
-        """Check if path matches global ignore rules."""
+    def is_globally_ignored(self, path, is_dir=False):
+        """
+        Check if path matches global ignore rules.
+        Args:
+            path: Path object or string.
+            is_dir: Boolean, set True if checking a directory to ensure pattern matching like 'dir/' works.
+        """
         path_str = self._normalize_path(path)
+        
+        # Always ignore internal _codebase folder
         if path_str == '_codebase' or path_str.startswith('_codebase/'):
             return True
-        return self.global_ignore_spec.match_file(path_str)
+
+        # For directory matching in gitignore, appending '/' ensures strict directory matching
+        # e.g. rule "foo/" matches directory "foo" but not file "foo"
+        check_path = path_str
+        if is_dir and not check_path.endswith('/'):
+            check_path += '/'
+            
+        return self.global_ignore_spec.match_file(check_path)
 
     def get_matching_configs(self, path):
         """Returns a list of config names that want to track this file."""
-        if self.is_globally_ignored(path):
+        # Optimization: Don't check tracks if globally ignored
+        if self.is_globally_ignored(path, is_dir=False):
             return []
 
         path_str = self._normalize_path(path)
         matching = []
 
         for name, specs in self.configs.items():
+            # 1. Must match track pattern
             if specs["track_spec"].match_file(path_str):
+                # 2. Must NOT match specific ignore pattern (if exists)
                 if specs["ignore_spec"] and specs["ignore_spec"].match_file(path_str):
                     continue
                 matching.append(name)

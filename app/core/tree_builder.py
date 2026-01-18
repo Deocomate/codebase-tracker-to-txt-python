@@ -1,5 +1,5 @@
-from pathlib import Path
 import os
+from pathlib import Path
 
 
 class TreeBuilder:
@@ -11,32 +11,62 @@ class TreeBuilder:
         self.tee_symbol = "├── "
         self.last_symbol = "└── "
 
-    def build_tree(self, project_path, ignored_dirs, all_files, max_depth=None):
-        """Build a tree representation of the project structure."""
+    def _normalize_path(self, path):
+        """
+        Normalize path to POSIX style (forward slashes) for consistent processing.
+        """
+        if isinstance(path, Path):
+            path = str(path)
+        return path.replace(os.sep, '/').strip('/')
+
+    def build_tree(self, project_path, ignored_items, all_files, max_depth=None):
+        """
+        Build a tree representation of the project structure.
+        
+        Args:
+            project_path: Path to the project root.
+            ignored_items: List of ignored items from scanner, each is a tuple (abs_path, rel_path, reason).
+            all_files: List of all file/dir paths (relative) discovered during scan.
+            max_depth: Optional max depth for the tree.
+        
+        Returns:
+            String representation of the tree.
+        """
         project_path = Path(project_path).absolute()
         tree_lines = ["."]
         file_structure = {}
-        ignored_dirs_set = set()
+        
+        # Build set of ignored paths for quick lookup
+        ignored_paths_set = set()
+        for item in ignored_items:
+            if isinstance(item, tuple) and len(item) >= 2:
+                rel_path = self._normalize_path(item[1])
+                ignored_paths_set.add(rel_path)
 
-        for dir_path in ignored_dirs:
-            if isinstance(dir_path, tuple) and len(dir_path) > 1:
-                rel_path = dir_path[1]
-            else:
-                rel_path = str(dir_path)
-            ignored_dirs_set.add(self._normalize_path(rel_path))
-
+        # Process all files/dirs to build hierarchical structure
         for file_item in all_files:
+            # Extract relative path from item (could be string or tuple)
             if isinstance(file_item, tuple) and len(file_item) >= 2:
-                abs_path, rel_path = file_item[0], file_item[1]
-                is_dir = os.path.isdir(abs_path) if abs_path else False
+                rel_path = self._normalize_path(file_item[1])
+                abs_path = file_item[0]
+                # Determine if directory from the absolute path
+                is_dir = Path(abs_path).is_dir() if abs_path and Path(abs_path).exists() else False
             else:
-                rel_path = file_item
-                is_dir = os.path.isdir(os.path.join(project_path, rel_path))
+                rel_path = self._normalize_path(file_item)
+                abs_path = project_path / rel_path
+                is_dir = abs_path.is_dir() if abs_path.exists() else '/' not in rel_path and not Path(rel_path).suffix
 
-            if str(rel_path).startswith('_codebase'):
+            # Skip _codebase folder (internal output folder)
+            if rel_path.startswith('_codebase'):
                 continue
 
-            path_parts = self._normalize_path(rel_path).split('/')
+            # Check if this path or any parent is ignored
+            is_ignored = rel_path in ignored_paths_set or any(
+                rel_path.startswith(ignored + '/') for ignored in ignored_paths_set
+            )
+
+            # Build nested dictionary structure
+            path_parts = rel_path.split('/')
             current_dict = file_structure
             current_path = ""
 
@@ -45,32 +75,40 @@ class TreeBuilder:
                     continue
 
                 current_path = f"{current_path}/{part}" if current_path else part
-                path_ignored = current_path in ignored_dirs_set or any(
-                    current_path.startswith(d + '/') for d in ignored_dirs_set
-                )
+                is_last_part = (i == len(path_parts) - 1)
+                
+                # Check if current path is specifically ignored
+                path_ignored = current_path in ignored_paths_set
 
-                if i == len(path_parts) - 1:
-                    if is_dir or i == len(path_parts) - 1:
-                        if part not in current_dict:
-                            current_dict[part] = {"__is_dir__": is_dir, "__ignored__": path_ignored}
-                else:
-                    if part not in current_dict:
-                        current_dict[part] = {"__is_dir__": True, "__ignored__": path_ignored}
-                    elif "__is_dir__" not in current_dict[part]:
-                        current_dict[part]["__is_dir__"] = True
+                if part not in current_dict:
+                    current_dict[part] = {
+                        "__is_dir__": not is_last_part or is_dir,
+                        "__ignored__": path_ignored
+                    }
+                
+                # Update ignored status if we found it's ignored
+                if path_ignored:
+                    current_dict[part]["__ignored__"] = True
 
+                # Navigate deeper only if not the last part and not ignored
+                if not is_last_part:
                     if not current_dict[part].get("__ignored__"):
                         current_dict = current_dict[part]
+                    else:
+                        # Stop building tree for ignored directories
+                        break
 
         self._build_tree_recursive(file_structure, tree_lines, "", 0, max_depth)
         return "\n".join(tree_lines)
 
     def _build_tree_recursive(self, node, lines, prefix, depth, max_depth):
-        """Recursively build tree lines."""
+        """Recursively build tree lines from nested dictionary structure."""
         if max_depth is not None and depth > max_depth:
             return
 
+        # Get entries excluding metadata keys
         entries = [(k, v) for k, v in node.items() if not k.startswith("__")]
+        # Sort: directories first, then alphabetically (case-insensitive)
         entries.sort(key=lambda x: (not x[1].get("__is_dir__", False), x[0].lower()))
 
         for i, (name, contents) in enumerate(entries):
@@ -78,20 +116,21 @@ class TreeBuilder:
             is_dir = contents.get("__is_dir__", False)
             is_ignored = contents.get("__ignored__", False)
 
-            if is_last:
-                lines.append(f"{prefix}{self.last_symbol}{name}{'/' if is_dir else ''}")
-                new_prefix = prefix + self.indent_symbol
-            else:
-                lines.append(f"{prefix}{self.tee_symbol}{name}{'/' if is_dir else ''}")
-                new_prefix = prefix + self.branch_symbol
+            # Choose the appropriate prefix symbol
+            connector = self.last_symbol if is_last else self.tee_symbol
+            
+            # Add suffix for directories
+            display_name = f"{name}/" if is_dir else name
+            
+            # Optionally mark ignored items (could add styling later)
+            lines.append(f"{prefix}{connector}{display_name}")
 
+            # Choose prefix for children
+            new_prefix = prefix + (self.indent_symbol if is_last else self.branch_symbol)
+
+            # Recurse into subdirectories only if not ignored
             if is_dir and not is_ignored:
-                filtered = {k: v for k, v in contents.items() if not k.startswith("__")}
-                if filtered:
+                # Filter out metadata keys for recursion
+                child_entries = {k: v for k, v in contents.items() if not k.startswith("__")}
+                if child_entries:
                     self._build_tree_recursive(contents, lines, new_prefix, depth + 1, max_depth)
-
-    def _normalize_path(self, path):
-        """Normalize path for consistent processing."""
-        if isinstance(path, Path):
-            path = str(path)
-        return path.replace('\\', '/').strip('/')

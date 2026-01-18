@@ -54,10 +54,9 @@ class FileCombiner:
         if all_files:
             if callback:
                 callback("Generating structure tree...", 0.1)
-            ignored_dirs = [item for item in ignored_items 
-                           if item[2] == "global_ignore" and os.path.exists(item[0]) and os.path.isdir(item[0])]
             
-            tree = self.tree_builder.build_tree(self.project_path, ignored_dirs, all_files)
+            # Pass all ignored items to tree_builder - it handles filtering internally
+            tree = self.tree_builder.build_tree(self.project_path, ignored_items, all_files)
             
             with open(self.structure_file, 'w', encoding='utf-8') as f:
                 f.write(f"# {self.project_path.name} | Structure | {timestamp}\n\n")
