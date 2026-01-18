@@ -4,10 +4,11 @@ import threading
 import os
 import platform
 import subprocess
-import struct
-from pathlib import Path
-from tkinterdnd2 import DND_FILES
 import shutil
+from pathlib import Path
+from urllib.parse import urlparse, unquote
+from urllib.request import url2pathname
+from tkinterdnd2 import DND_FILES, DND_ALL, DND_TEXT
 
 if platform.system() == "Windows":
     try:
@@ -112,9 +113,10 @@ class CodebaseTrackerUI:
         ttk.Button(path_buttons_frame, text="Paste", style="Small.Secondary.TButton", command=self._paste_path).pack(side=tk.LEFT, padx=(0, 5))
         ttk.Button(path_buttons_frame, text="Browse...", style="Small.Secondary.TButton", command=self._browse_folder).pack(side=tk.LEFT)
 
-        path_input_frame.drop_target_register(DND_FILES)
+        # Register for all drag types for broader Electron app compatibility
+        path_input_frame.drop_target_register(DND_ALL)
         path_input_frame.dnd_bind('<<Drop>>', self._on_drop)
-        self.path_entry.drop_target_register(DND_FILES)
+        self.path_entry.drop_target_register(DND_ALL)
         self.path_entry.dnd_bind('<<Drop>>', self._on_drop)
 
         # Actions
@@ -148,8 +150,96 @@ class CodebaseTrackerUI:
 
         self.results_frame = ttk.LabelFrame(main_frame, text="Result", padding="10")
 
+    def _parse_dropped_data(self, data):
+        """
+        Parses the dropped data to handle various formats:
+        1. Plain OS paths
+        2. Tcl list format (wrapped in curly braces)
+        3. File URIs (file:///...) typical from Electron apps/browsers
+        """
+        # Remove potential curly braces from Tcl formatting
+        data = data.strip()
+        if data.startswith('{') and data.endswith('}'):
+            data = data[1:-1]
+        
+        # If multiple files are dropped, Tcl often separates them with spaces.
+        # Simple heuristic: if it looks like a list of paths, take the first one.
+        if '}{' in data:
+            data = data.split('}{')[0] + '}'
+            if data.startswith('{') and data.endswith('}'):
+                data = data[1:-1]
+
+        # Handle URI format (file://...)
+        if data.startswith('file://'):
+            try:
+                parsed = urlparse(data)
+                # url2pathname handles decoding %20 to spaces and OS separators
+                path = url2pathname(parsed.path)
+                
+                # On Windows, url2pathname usually returns something like \c:\users...
+                # or just /c:/users... depending on implementation. Ensure valid path.
+                if platform.system() == "Windows" and path.startswith('\\') and not path.startswith('\\\\'):
+                    # Remove leading backslash for drive paths if present erroneously
+                    path = path.lstrip('\\')
+                return path
+            except Exception:
+                return data
+        
+        return data
+
+    def _normalize_project_path(self, path_str):
+        """
+        Adjust path if user accidentally drops the _codebase folder 
+        or a file inside it. Returns the project root.
+        """
+        if not path_str:
+            return ""
+            
+        try:
+            path = Path(path_str).resolve()
+            
+            # Check if we are pointing directly to _codebase
+            if path.name == '_codebase':
+                return str(path.parent)
+            
+            # Check if we are inside _codebase
+            # Iterate upwards to see if '_codebase' is a parent
+            current = path
+            while current != current.parent:  # Stop at root
+                if current.name == '_codebase':
+                    return str(current.parent)
+                current = current.parent
+                
+            return str(path)
+        except Exception:
+            return path_str
+
     def _on_drop(self, event):
-        self.path_var.set(event.data.strip('{}'))
+        """
+        Handle drag and drop event from various sources.
+        Falls back to clipboard if drag data is empty (common with Electron apps like VS Code).
+        """
+        raw_data = event.data if hasattr(event, 'data') else ''
+        
+        # Debug: print raw data to console for troubleshooting
+        print(f"[DEBUG DnD] Raw drop data: '{raw_data}'")
+        
+        # If drag data is empty, try clipboard as fallback (Electron apps workaround)
+        if not raw_data or raw_data.strip() == '':
+            try:
+                clipboard_data = self.root.clipboard_get()
+                if clipboard_data:
+                    print(f"[DEBUG DnD] Using clipboard fallback: '{clipboard_data}'")
+                    raw_data = clipboard_data
+            except tk.TclError:
+                pass
+        
+        if raw_data:
+            clean_path = self._parse_dropped_data(raw_data)
+            final_path = self._normalize_project_path(clean_path)
+            self.path_var.set(final_path)
+        else:
+            self.status_var.set("Drop failed. Try using Copy Path then Paste button instead.")
 
     def _browse_folder(self):
         folder = filedialog.askdirectory(title="Select Project Folder")
@@ -157,8 +247,16 @@ class CodebaseTrackerUI:
             self.path_var.set(folder)
 
     def _paste_path(self):
+        """Paste and parse path from clipboard, handling file:// URIs."""
         try:
-            self.path_var.set(self.root.clipboard_get())
+            clipboard_data = self.root.clipboard_get()
+            if clipboard_data:
+                # Parse and normalize the pasted path
+                clean_path = self._parse_dropped_data(clipboard_data)
+                final_path = self._normalize_project_path(clean_path)
+                self.path_var.set(final_path)
+            else:
+                self.status_var.set("Clipboard is empty.")
         except tk.TclError:
             self.status_var.set("Clipboard is empty or does not contain text.")
 
