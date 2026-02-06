@@ -39,3 +39,31 @@ class XmlFormatter(BaseFormatter):
         lines.append("</codebase>")
 
         return "\n".join(lines)
+
+    def write_output(self, file_handle, config_name: str, timestamp: str, files: list) -> int:
+        chars = 0
+        escaped_config = saxutils.escape(config_name)
+        header = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            f'<codebase config="{escaped_config}" files="{len(files)}" generated="{timestamp}">\n'
+        )
+        file_handle.write(header)
+        chars += len(header)
+
+        for abs_path, rel_path in files:
+            content = self._read_file_content(abs_path, rel_path)
+            language = self._get_language_from_extension(rel_path)
+            normalized_path = rel_path.replace("\\", "/")
+            escaped_path = saxutils.escape(normalized_path)
+            safe_content = content.replace("]]>", "]]]]><![CDATA[>")
+            line = (
+                f'  <file path="{escaped_path}" language="{language}">'
+                f"<![CDATA[{safe_content}]]></file>\n"
+            )
+            file_handle.write(line)
+            chars += len(line)
+
+        footer = "</codebase>\n"
+        file_handle.write(footer)
+        chars += len(footer)
+        return chars

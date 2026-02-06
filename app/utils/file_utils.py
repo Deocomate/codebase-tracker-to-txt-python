@@ -1,6 +1,7 @@
 import os
 import mimetypes
 from pathlib import Path
+import chardet
 
 # Binary file extensions - always skip
 NON_TEXT_EXTENSIONS = {
@@ -77,7 +78,7 @@ def is_text_file(file_path):
                 mime_type.startswith('video/') or mime_type.startswith('font/')):
             return False
 
-    # 6. Fallback: check for NULL bytes
+    # 6. Fallback: check for NULL bytes and detect encoding
     try:
         with open(file_path, 'rb') as f:
             chunk = f.read(4096)
@@ -85,6 +86,11 @@ def is_text_file(file_path):
                 return True
             if b'\0' in chunk:
                 return False
+        result = chardet.detect(chunk)
+        encoding = result.get('encoding')
+        confidence = result.get('confidence', 0)
+        if encoding and confidence > 0.5:
+            return True
         try:
             chunk.decode('utf-8')
             return True
@@ -92,6 +98,23 @@ def is_text_file(file_path):
             return False
     except (IOError, OSError):
         return False
+
+
+def detect_encoding(file_path: str, sample_size: int = 8192) -> str:
+    """Detect file encoding using chardet with safe fallback."""
+    try:
+        with open(file_path, 'rb') as f:
+            raw = f.read(sample_size)
+        if not raw:
+            return 'utf-8'
+        result = chardet.detect(raw)
+        encoding = result.get('encoding')
+        confidence = result.get('confidence', 0)
+        if encoding and confidence > 0.5:
+            return encoding
+        return 'utf-8'
+    except (IOError, OSError):
+        return 'utf-8'
 
 
 def format_file_size(size_bytes):

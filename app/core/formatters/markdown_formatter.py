@@ -34,3 +34,30 @@ class MarkdownFormatter(BaseFormatter):
             lines.append("")
 
         return "\n".join(lines)
+
+    def write_output(self, file_handle, config_name: str, timestamp: str, files: list) -> int:
+        chars = 0
+        header_lines = [
+            f"# {config_name}\n",
+            "\n",
+            f"> Generated: {timestamp} | Files: {len(files)}\n",
+            "\n",
+            "---\n",
+            "\n",
+        ]
+        for line in header_lines:
+            file_handle.write(line)
+            chars += len(line)
+
+        for abs_path, rel_path in files:
+            content = self._read_file_content(abs_path, rel_path)
+            language = self._get_language_from_extension(rel_path)
+            normalized_path = rel_path.replace("\\", "/")
+            chunk = (
+                f"## `{normalized_path}`\n\n"
+                f"```{language}\n{content}\n```\n\n"
+            )
+            file_handle.write(chunk)
+            chars += len(chunk)
+
+        return chars

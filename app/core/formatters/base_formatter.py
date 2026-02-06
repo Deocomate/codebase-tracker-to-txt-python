@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-import io
+from app.utils.file_utils import detect_encoding
 
 
 class BaseFormatter(ABC):
@@ -52,28 +52,32 @@ class BaseFormatter(ABC):
         """
         pass
 
+    def write_output(self, file_handle, config_name: str, timestamp: str, files: list) -> int:
+        """
+        Stream formatted output directly to a file handle.
+        Returns total characters written.
+        """
+        content = self.format_output(config_name, timestamp, files)
+        file_handle.write(content)
+        return len(content)
+
     def _read_file_content(self, abs_path: str, rel_path: str) -> str:
         """Read and optionally strip comments from file content."""
         try:
+            encoding = detect_encoding(abs_path)
             comment_marker = (
                 self.COMMENT_MARKERS.get(Path(rel_path).suffix.lower())
                 if self.strip_comments
                 else None
             )
 
-            with open(abs_path, "rb") as raw_file:
-                text_stream = io.TextIOWrapper(
-                    raw_file, encoding="utf-8", errors="replace"
-                )
-                try:
-                    lines = []
-                    for line in text_stream:
-                        if self._should_skip_line(line, comment_marker):
-                            continue
-                        lines.append(line.rstrip("\n\r"))
-                    return "\n".join(lines)
-                finally:
-                    text_stream.detach()
+            with open(abs_path, "r", encoding=encoding, errors="replace") as text_file:
+                lines = []
+                for line in text_file:
+                    if self._should_skip_line(line, comment_marker):
+                        continue
+                    lines.append(line.rstrip("\n\r"))
+                return "\n".join(lines)
         except Exception as e:
             return f"ERROR: Could not read file: {e}"
 

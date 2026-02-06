@@ -5,43 +5,34 @@ import os
 import platform
 import subprocess
 import shutil
-import ctypes
-import struct
 from pathlib import Path
-from urllib.parse import urlparse, unquote
+from urllib.parse import urlparse
 from urllib.request import url2pathname
 from tkinterdnd2 import DND_FILES, DND_ALL, DND_TEXT
-
-if platform.system() == "Windows":
-    try:
-        import win32clipboard
-        import win32con
-
-        WINDOWS_COPY_SUPPORT = True
-    except ImportError:
-        WINDOWS_COPY_SUPPORT = False
-else:
-    WINDOWS_COPY_SUPPORT = False
 
 from app.core.processor import ProjectProcessor
 from app.core.scanner import FileScanner
 from app.core.formatters import FORMATTERS
-
-# UI Colors and Fonts
-BACKGROUND_COLOR = "#ffffff"
-PRIMARY_COLOR = "#4285F4"
-PRIMARY_LIGHT_COLOR = "#E8F0FE"
-CANCEL_COLOR = "#D93025"
-CANCEL_HOVER_COLOR = "#E84C3D"
-TEXT_COLOR = "#202124"
-TEXT_SECONDARY_COLOR = "#5F6368"
-SUCCESS_COLOR = "#34A853"
-BUTTON_HOVER_COLOR = "#5A95F5"
-BORDER_COLOR = "#DADCE0"
-SOFT_BORDER_COLOR = "#E0E0E0"
-FONT_FAMILY = "Segoe UI"
-FONT_NORMAL = (FONT_FAMILY, 9)
-FONT_BOLD = (FONT_FAMILY, 10, "bold")
+from app.gui.theme import (
+    BACKGROUND_COLOR,
+    PRIMARY_COLOR,
+    PRIMARY_LIGHT_COLOR,
+    CANCEL_COLOR,
+    CANCEL_HOVER_COLOR,
+    TEXT_COLOR,
+    TEXT_SECONDARY_COLOR,
+    SUCCESS_COLOR,
+    BUTTON_HOVER_COLOR,
+    BORDER_COLOR,
+    SOFT_BORDER_COLOR,
+    FONT_FAMILY,
+    FONT_NORMAL,
+    FONT_BOLD,
+)
+from app.utils.clipboard_utils import (
+    is_clipboard_copy_supported,
+    copy_files_to_clipboard,
+)
 
 
 class CodebaseTrackerUI:
@@ -492,6 +483,7 @@ class CodebaseTrackerUI:
                 self.output_stats = stats
                 self._update_status("Success! Output file generated.", 1.0)
                 self.root.after(0, self._show_results)
+                self.root.after(0, self._auto_copy_after_scan)
             else:
                 self._update_status(f"Error: {message}", 1.0)
                 messagebox.showerror("Error", f"An error occurred: {message}")
@@ -517,6 +509,17 @@ class CodebaseTrackerUI:
                 self.progress_var.set(progress)
 
         self.root.after(0, update)
+
+    def _auto_copy_after_scan(self):
+        if not is_clipboard_copy_supported():
+            return
+        if not self.output_stats:
+            return
+        try:
+            self._auto_copy_files_to_clipboard()
+        except Exception:
+            # Keep scan flow stable even if clipboard fails
+            pass
 
     def _show_results(self):
         for widget in self.results_frame.winfo_children():
@@ -639,41 +642,8 @@ class CodebaseTrackerUI:
                 return filename
         return None
 
-    def _set_clipboard_files_windows(self, file_paths):
-        dropfiles_header = struct.pack("IiiII", 20, 0, 0, 0, 1)
-        files_blob = ("\0".join(file_paths) + "\0\0").encode("utf-16le")
-        data = dropfiles_header + files_blob
-
-        kernel32 = ctypes.windll.kernel32
-        kernel32.GlobalAlloc.restype = ctypes.c_void_p
-        kernel32.GlobalLock.restype = ctypes.c_void_p
-        kernel32.GlobalLock.argtypes = [ctypes.c_void_p]
-        kernel32.GlobalUnlock.argtypes = [ctypes.c_void_p]
-        kernel32.GlobalFree.argtypes = [ctypes.c_void_p]
-
-        GMEM_MOVEABLE = 0x0002
-        hglobal = kernel32.GlobalAlloc(GMEM_MOVEABLE, len(data))
-        if not hglobal:
-            raise RuntimeError("GlobalAlloc failed.")
-
-        locked = kernel32.GlobalLock(hglobal)
-        if not locked:
-            kernel32.GlobalFree(hglobal)
-            raise RuntimeError("GlobalLock failed.")
-
-        try:
-            ctypes.memmove(locked, data, len(data))
-        finally:
-            kernel32.GlobalUnlock(hglobal)
-
-        try:
-            win32clipboard.SetClipboardData(win32con.CF_HDROP, hglobal)
-        except Exception:
-            kernel32.GlobalFree(hglobal)
-            raise
-
     def _auto_copy_files_to_clipboard(self):
-        if not WINDOWS_COPY_SUPPORT:
+        if not is_clipboard_copy_supported():
             messagebox.showerror(
                 "Error",
                 "Auto copy file is supported on Windows with pywin32 installed.",
@@ -718,12 +688,7 @@ class CodebaseTrackerUI:
                 os.path.normpath(output_path),
                 os.path.normpath(structure_path),
             ]
-            opened = False
-            win32clipboard.OpenClipboard()
-            opened = True
-            win32clipboard.EmptyClipboard()
-            self._set_clipboard_files_windows(file_paths)
-            win32clipboard.CloseClipboard()
+            copy_files_to_clipboard(file_paths)
             self.status_var.set(
                 f"Copied {output_filename} and {Path(structure_path).name} to clipboard."
             )
@@ -734,12 +699,6 @@ class CodebaseTrackerUI:
                 )
         except Exception as e:
             messagebox.showerror("Error", f"Failed to copy files: {e}")
-        finally:
-            if "opened" in locals() and opened:
-                try:
-                    win32clipboard.CloseClipboard()
-                except Exception:
-                    pass
 
     def _edit_settings(self):
         if not self.project_path:

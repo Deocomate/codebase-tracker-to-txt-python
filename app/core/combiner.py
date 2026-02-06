@@ -87,15 +87,13 @@ class FileCombiner:
                     )
 
                 try:
-                    content = formatter.format_output(
-                        config_name, timestamp, text_files
-                    )
-
                     with open(output_path, "w", encoding="utf-8") as outfile:
-                        outfile.write(content)
+                        chars_written = formatter.write_output(
+                            outfile, config_name, timestamp, text_files
+                        )
 
                     generated_files.append(output_filename)
-                    total_stats["total_chars"] += len(content)
+                    total_stats["total_chars"] += chars_written
 
                 except Exception as e:
                     print(f"Error creating {output_filename}: {e}")

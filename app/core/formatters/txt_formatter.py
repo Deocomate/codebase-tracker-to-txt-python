@@ -20,3 +20,17 @@ class TxtFormatter(BaseFormatter):
             lines.append("")  # Empty line between files
 
         return "\n".join(lines)
+
+    def write_output(self, file_handle, config_name: str, timestamp: str, files: list) -> int:
+        chars = 0
+        header = f"# {config_name} | {len(files)} files | {timestamp}\n\n"
+        file_handle.write(header)
+        chars += len(header)
+
+        for abs_path, rel_path in files:
+            content = self._read_file_content(abs_path, rel_path)
+            chunk = f"// {rel_path}\n{content}\n\n"
+            file_handle.write(chunk)
+            chars += len(chunk)
+
+        return chars
