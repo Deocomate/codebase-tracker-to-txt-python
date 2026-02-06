@@ -5,6 +5,8 @@ import os
 import platform
 import subprocess
 import shutil
+import ctypes
+import struct
 from pathlib import Path
 from urllib.parse import urlparse, unquote
 from urllib.request import url2pathname
@@ -14,6 +16,7 @@ if platform.system() == "Windows":
     try:
         import win32clipboard
         import win32con
+
         WINDOWS_COPY_SUPPORT = True
     except ImportError:
         WINDOWS_COPY_SUPPORT = False
@@ -22,6 +25,7 @@ else:
 
 from app.core.processor import ProjectProcessor
 from app.core.scanner import FileScanner
+from app.core.formatters import FORMATTERS
 
 # UI Colors and Fonts
 BACKGROUND_COLOR = "#ffffff"
@@ -62,36 +66,109 @@ class CodebaseTrackerUI:
         self.cancel_event = threading.Event()
         self.worker_thread = None
 
+        # Export format options
+        self.format_vars = {}
+        self.export_format_order = []
+
         self._setup_styles()
         self._setup_ui()
 
     def _setup_styles(self):
         style = ttk.Style(self.root)
-        style.theme_use('clam')
+        style.theme_use("clam")
 
         style.configure("TFrame", background=BACKGROUND_COLOR)
-        style.configure("TLabel", background=BACKGROUND_COLOR, foreground=TEXT_COLOR, font=FONT_NORMAL)
+        style.configure(
+            "TLabel",
+            background=BACKGROUND_COLOR,
+            foreground=TEXT_COLOR,
+            font=FONT_NORMAL,
+        )
         style.configure("TEntry", fieldbackground="white", bordercolor=BORDER_COLOR)
-        style.map("TEntry", bordercolor=[('focus', PRIMARY_COLOR)])
-        style.configure("TLabelframe", background=BACKGROUND_COLOR, bordercolor=SOFT_BORDER_COLOR, relief=tk.SOLID, borderwidth=1)
-        style.configure("TLabelframe.Label", background=BACKGROUND_COLOR, foreground=TEXT_COLOR, font=FONT_BOLD)
+        style.map("TEntry", bordercolor=[("focus", PRIMARY_COLOR)])
+        style.configure(
+            "TLabelframe",
+            background=BACKGROUND_COLOR,
+            bordercolor=SOFT_BORDER_COLOR,
+            relief=tk.SOLID,
+            borderwidth=1,
+        )
+        style.configure(
+            "TLabelframe.Label",
+            background=BACKGROUND_COLOR,
+            foreground=TEXT_COLOR,
+            font=FONT_BOLD,
+        )
 
-        style.configure("Primary.TButton", background=PRIMARY_COLOR, foreground="white", font=FONT_BOLD, padding=(15, 10), borderwidth=0)
-        style.map("Primary.TButton", background=[('active', BUTTON_HOVER_COLOR), ('disabled', '#A0C3FF')])
+        style.configure(
+            "Primary.TButton",
+            background=PRIMARY_COLOR,
+            foreground="white",
+            font=FONT_BOLD,
+            padding=(15, 10),
+            borderwidth=0,
+        )
+        style.map(
+            "Primary.TButton",
+            background=[("active", BUTTON_HOVER_COLOR), ("disabled", "#A0C3FF")],
+        )
 
-        style.configure("Secondary.TButton", background=BACKGROUND_COLOR, foreground=PRIMARY_COLOR, font=FONT_BOLD, padding=(10, 7), borderwidth=1, bordercolor=BORDER_COLOR)
-        style.map("Secondary.TButton", background=[('active', PRIMARY_LIGHT_COLOR)], bordercolor=[('active', PRIMARY_COLOR)])
+        style.configure(
+            "Secondary.TButton",
+            background=BACKGROUND_COLOR,
+            foreground=PRIMARY_COLOR,
+            font=FONT_BOLD,
+            padding=(10, 7),
+            borderwidth=1,
+            bordercolor=BORDER_COLOR,
+        )
+        style.map(
+            "Secondary.TButton",
+            background=[("active", PRIMARY_LIGHT_COLOR)],
+            bordercolor=[("active", PRIMARY_COLOR)],
+        )
 
-        style.configure("Small.Secondary.TButton", background=BACKGROUND_COLOR, foreground=PRIMARY_COLOR, font=FONT_NORMAL, padding=(8, 4), borderwidth=1, bordercolor=BORDER_COLOR)
-        style.map("Small.Secondary.TButton", background=[('active', PRIMARY_LIGHT_COLOR)], bordercolor=[('active', PRIMARY_COLOR)])
+        style.configure(
+            "Small.Secondary.TButton",
+            background=BACKGROUND_COLOR,
+            foreground=PRIMARY_COLOR,
+            font=FONT_NORMAL,
+            padding=(8, 4),
+            borderwidth=1,
+            bordercolor=BORDER_COLOR,
+        )
+        style.map(
+            "Small.Secondary.TButton",
+            background=[("active", PRIMARY_LIGHT_COLOR)],
+            bordercolor=[("active", PRIMARY_COLOR)],
+        )
 
-        style.configure("Success.TButton", background=SUCCESS_COLOR, foreground="white", font=FONT_BOLD, padding=(12, 8), borderwidth=0)
-        style.map("Success.TButton", background=[('active', '#2E8A47')])
+        style.configure(
+            "Success.TButton",
+            background=SUCCESS_COLOR,
+            foreground="white",
+            font=FONT_BOLD,
+            padding=(12, 8),
+            borderwidth=0,
+        )
+        style.map("Success.TButton", background=[("active", "#2E8A47")])
 
-        style.configure("Cancel.TButton", background=CANCEL_COLOR, foreground="white", font=FONT_BOLD, padding=(15, 10), borderwidth=0)
-        style.map("Cancel.TButton", background=[('active', CANCEL_HOVER_COLOR)])
+        style.configure(
+            "Cancel.TButton",
+            background=CANCEL_COLOR,
+            foreground="white",
+            font=FONT_BOLD,
+            padding=(15, 10),
+            borderwidth=0,
+        )
+        style.map("Cancel.TButton", background=[("active", CANCEL_HOVER_COLOR)])
 
-        style.configure("TProgressbar", thickness=4, background=PRIMARY_COLOR, troughcolor=PRIMARY_LIGHT_COLOR)
+        style.configure(
+            "TProgressbar",
+            thickness=4,
+            background=PRIMARY_COLOR,
+            troughcolor=PRIMARY_LIGHT_COLOR,
+        )
 
     def _setup_ui(self):
         main_frame = ttk.Frame(self.root, padding="15")
@@ -103,21 +180,51 @@ class CodebaseTrackerUI:
         path_input_frame.columnconfigure(0, weight=1)
 
         self.path_var = tk.StringVar()
-        self.path_entry = ttk.Entry(path_input_frame, textvariable=self.path_var, font=FONT_NORMAL)
+        self.path_entry = ttk.Entry(
+            path_input_frame, textvariable=self.path_var, font=FONT_NORMAL
+        )
         self.path_entry.grid(row=0, column=0, sticky="ew", ipady=4)
         self.path_var.trace_add("write", self._validate_path_from_entry)
 
         path_buttons_frame = ttk.Frame(path_input_frame)
         path_buttons_frame.grid(row=0, column=1, sticky="e", padx=(8, 0))
 
-        ttk.Button(path_buttons_frame, text="Paste", style="Small.Secondary.TButton", command=self._paste_path).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(path_buttons_frame, text="Browse...", style="Small.Secondary.TButton", command=self._browse_folder).pack(side=tk.LEFT)
+        ttk.Button(
+            path_buttons_frame,
+            text="Paste",
+            style="Small.Secondary.TButton",
+            command=self._paste_path,
+        ).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(
+            path_buttons_frame,
+            text="Browse...",
+            style="Small.Secondary.TButton",
+            command=self._browse_folder,
+        ).pack(side=tk.LEFT)
 
         # Register for all drag types for broader Electron app compatibility
         path_input_frame.drop_target_register(DND_ALL)
-        path_input_frame.dnd_bind('<<Drop>>', self._on_drop)
+        path_input_frame.dnd_bind("<<Drop>>", self._on_drop)
         self.path_entry.drop_target_register(DND_ALL)
-        self.path_entry.dnd_bind('<<Drop>>', self._on_drop)
+        self.path_entry.dnd_bind("<<Drop>>", self._on_drop)
+
+        # Export Format Selection
+        format_frame = ttk.LabelFrame(main_frame, text="Export Formats", padding="10")
+        format_frame.pack(fill=tk.X, pady=(0, 10))
+
+        formats = [
+            ("TXT", "txt", True),
+            ("JSON", "json", False),
+            ("Markdown", "md", False),
+            ("XML", "xml", False),
+        ]
+        self.export_format_order = [fmt for _, fmt, _ in formats]
+
+        for i, (label, fmt, default) in enumerate(formats):
+            var = tk.BooleanVar(value=default)
+            self.format_vars[fmt] = var
+            cb = ttk.Checkbutton(format_frame, text=label, variable=var)
+            cb.pack(side=tk.LEFT, padx=(0, 15))
 
         # Actions
         actions_frame = ttk.Frame(main_frame)
@@ -126,26 +233,55 @@ class CodebaseTrackerUI:
         actions_frame.columnconfigure(1, weight=1)
         actions_frame.columnconfigure(2, weight=1)
 
-        self.scan_btn = ttk.Button(actions_frame, text="Scan & Generate", style="Primary.TButton", command=self._scan_project, state=tk.DISABLED)
+        self.scan_btn = ttk.Button(
+            actions_frame,
+            text="Scan & Generate",
+            style="Primary.TButton",
+            command=self._scan_project,
+            state=tk.DISABLED,
+        )
         self.scan_btn.grid(row=0, column=0, sticky="ew")
 
-        self.cancel_btn = ttk.Button(actions_frame, text="Cancel", style="Cancel.TButton", command=self._on_cancel)
+        self.cancel_btn = ttk.Button(
+            actions_frame,
+            text="Cancel",
+            style="Cancel.TButton",
+            command=self._on_cancel,
+        )
 
-        self.edit_settings_btn = ttk.Button(actions_frame, text="Edit Settings", style="Secondary.TButton", command=self._edit_settings, state=tk.DISABLED)
+        self.edit_settings_btn = ttk.Button(
+            actions_frame,
+            text="Edit Settings",
+            style="Secondary.TButton",
+            command=self._edit_settings,
+            state=tk.DISABLED,
+        )
         self.edit_settings_btn.grid(row=0, column=1, sticky="ew", padx=(10, 5))
 
-        self.reset_settings_btn = ttk.Button(actions_frame, text="Reset Settings", style="Secondary.TButton", command=self._reset_settings, state=tk.DISABLED)
+        self.reset_settings_btn = ttk.Button(
+            actions_frame,
+            text="Reset Settings",
+            style="Secondary.TButton",
+            command=self._reset_settings,
+            state=tk.DISABLED,
+        )
         self.reset_settings_btn.grid(row=0, column=2, sticky="ew")
 
         # Status
         status_frame = ttk.LabelFrame(main_frame, text="Status", padding="10")
         status_frame.pack(fill=tk.X, pady=(0, 10))
 
-        self.status_var = tk.StringVar(value="Select or paste a project folder to begin.")
-        ttk.Label(status_frame, textvariable=self.status_var, wraplength=650).pack(fill=tk.X, pady=(0, 5))
+        self.status_var = tk.StringVar(
+            value="Select or paste a project folder to begin."
+        )
+        ttk.Label(status_frame, textvariable=self.status_var, wraplength=650).pack(
+            fill=tk.X, pady=(0, 5)
+        )
 
         self.progress_var = tk.DoubleVar()
-        self.progress_bar = ttk.Progressbar(status_frame, variable=self.progress_var, maximum=1.0)
+        self.progress_bar = ttk.Progressbar(
+            status_frame, variable=self.progress_var, maximum=1.0
+        )
         self.progress_bar.pack(fill=tk.X, pady=5)
 
         self.results_frame = ttk.LabelFrame(main_frame, text="Result", padding="10")
@@ -159,57 +295,61 @@ class CodebaseTrackerUI:
         """
         # Remove potential curly braces from Tcl formatting
         data = data.strip()
-        if data.startswith('{') and data.endswith('}'):
+        if data.startswith("{") and data.endswith("}"):
             data = data[1:-1]
-        
+
         # If multiple files are dropped, Tcl often separates them with spaces.
         # Simple heuristic: if it looks like a list of paths, take the first one.
-        if '}{' in data:
-            data = data.split('}{')[0] + '}'
-            if data.startswith('{') and data.endswith('}'):
+        if "}{" in data:
+            data = data.split("}{")[0] + "}"
+            if data.startswith("{") and data.endswith("}"):
                 data = data[1:-1]
 
         # Handle URI format (file://...)
-        if data.startswith('file://'):
+        if data.startswith("file://"):
             try:
                 parsed = urlparse(data)
                 # url2pathname handles decoding %20 to spaces and OS separators
                 path = url2pathname(parsed.path)
-                
+
                 # On Windows, url2pathname usually returns something like \c:\users...
                 # or just /c:/users... depending on implementation. Ensure valid path.
-                if platform.system() == "Windows" and path.startswith('\\') and not path.startswith('\\\\'):
+                if (
+                    platform.system() == "Windows"
+                    and path.startswith("\\")
+                    and not path.startswith("\\\\")
+                ):
                     # Remove leading backslash for drive paths if present erroneously
-                    path = path.lstrip('\\')
+                    path = path.lstrip("\\")
                 return path
             except Exception:
                 return data
-        
+
         return data
 
     def _normalize_project_path(self, path_str):
         """
-        Adjust path if user accidentally drops the _codebase folder 
+        Adjust path if user accidentally drops the _codebase folder
         or a file inside it. Returns the project root.
         """
         if not path_str:
             return ""
-            
+
         try:
             path = Path(path_str).resolve()
-            
+
             # Check if we are pointing directly to _codebase
-            if path.name == '_codebase':
+            if path.name == "_codebase":
                 return str(path.parent)
-            
+
             # Check if we are inside _codebase
             # Iterate upwards to see if '_codebase' is a parent
             current = path
             while current != current.parent:  # Stop at root
-                if current.name == '_codebase':
+                if current.name == "_codebase":
                     return str(current.parent)
                 current = current.parent
-                
+
             return str(path)
         except Exception:
             return path_str
@@ -219,13 +359,13 @@ class CodebaseTrackerUI:
         Handle drag and drop event from various sources.
         Falls back to clipboard if drag data is empty (common with Electron apps like VS Code).
         """
-        raw_data = event.data if hasattr(event, 'data') else ''
-        
+        raw_data = event.data if hasattr(event, "data") else ""
+
         # Debug: print raw data to console for troubleshooting
         print(f"[DEBUG DnD] Raw drop data: '{raw_data}'")
-        
+
         # If drag data is empty, try clipboard as fallback (Electron apps workaround)
-        if not raw_data or raw_data.strip() == '':
+        if not raw_data or raw_data.strip() == "":
             try:
                 clipboard_data = self.root.clipboard_get()
                 if clipboard_data:
@@ -233,13 +373,15 @@ class CodebaseTrackerUI:
                     raw_data = clipboard_data
             except tk.TclError:
                 pass
-        
+
         if raw_data:
             clean_path = self._parse_dropped_data(raw_data)
             final_path = self._normalize_project_path(clean_path)
             self.path_var.set(final_path)
         else:
-            self.status_var.set("Drop failed. Try using Copy Path then Paste button instead.")
+            self.status_var.set(
+                "Drop failed. Try using Copy Path then Paste button instead."
+            )
 
     def _browse_folder(self):
         folder = filedialog.askdirectory(title="Select Project Folder")
@@ -261,17 +403,17 @@ class CodebaseTrackerUI:
             self.status_var.set("Clipboard is empty or does not contain text.")
 
     def _add_to_gitignore(self, project_path):
-        gitignore_path = os.path.join(project_path, '.gitignore')
+        gitignore_path = os.path.join(project_path, ".gitignore")
         line_to_add = "_codebase/"
         try:
             if os.path.exists(gitignore_path):
-                with open(gitignore_path, 'r+', encoding='utf-8') as f:
+                with open(gitignore_path, "r+", encoding="utf-8") as f:
                     content = f.read()
                     if line_to_add not in content:
                         f.seek(0, os.SEEK_END)
-                        if not content.endswith('\n'):
-                            f.write('\n')
-                        f.write(f'\n# Added by CodebaseTracker\n{line_to_add}\n')
+                        if not content.endswith("\n"):
+                            f.write("\n")
+                        f.write(f"\n# Added by CodebaseTracker\n{line_to_add}\n")
         except Exception as e:
             self.status_var.set(f"Could not update .gitignore: {e}")
 
@@ -287,7 +429,9 @@ class CodebaseTrackerUI:
         else:
             self.project_path = None
             if path:
-                self.status_var.set("Invalid path. Please provide a valid project folder.")
+                self.status_var.set(
+                    "Invalid path. Please provide a valid project folder."
+                )
             self.scan_btn.config(state=tk.DISABLED)
             self.edit_settings_btn.config(state=tk.DISABLED)
             self.reset_settings_btn.config(state=tk.DISABLED)
@@ -326,8 +470,18 @@ class CodebaseTrackerUI:
             return
 
         try:
+            # Get selected export formats
+            selected_formats = [
+                fmt for fmt, var in self.format_vars.items() if var.get()
+            ]
+            if not selected_formats:
+                selected_formats = ["txt"]  # Fallback to TXT if none selected
+
             success, message, stats = self.processor.run(
-                self._scan_callback, self._combine_callback, self.cancel_event
+                self._scan_callback,
+                self._combine_callback,
+                self.cancel_event,
+                selected_formats,
             )
 
             if self.cancel_event.is_set():
@@ -361,6 +515,7 @@ class CodebaseTrackerUI:
             self.status_var.set(message)
             if progress is not None and progress >= 0:
                 self.progress_var.set(progress)
+
         self.root.after(0, update)
 
     def _show_results(self):
@@ -373,37 +528,71 @@ class CodebaseTrackerUI:
 
         info_frame = ttk.Frame(self.results_frame)
         info_frame.pack(fill=tk.X, pady=(0, 10))
-        
-        ttk.Label(info_frame, text=stats.get('summary', 'Process completed.'), font=FONT_BOLD, wraplength=600).pack(anchor="w")
-        stats_text = f"Total Files: {stats.get('total_files_included', 0)}   |   Ignored: {stats.get('ignored_items', 0)}   |   Chars: {stats.get('total_chars', 0):,}"
-        ttk.Label(info_frame, text=stats_text, font=FONT_NORMAL).pack(anchor="w", pady=(5, 0))
 
-        files_frame = ttk.LabelFrame(self.results_frame, text="Generated Files", padding="5")
+        ttk.Label(
+            info_frame,
+            text=stats.get("summary", "Process completed."),
+            font=FONT_BOLD,
+            wraplength=600,
+        ).pack(anchor="w")
+        stats_text = f"Total Files: {stats.get('total_files_included', 0)}   |   Ignored: {stats.get('ignored_items', 0)}   |   Chars: {stats.get('total_chars', 0):,}"
+        ttk.Label(info_frame, text=stats_text, font=FONT_NORMAL).pack(
+            anchor="w", pady=(5, 0)
+        )
+
+        files_frame = ttk.LabelFrame(
+            self.results_frame, text="Generated Files", padding="5"
+        )
         files_frame.pack(fill=tk.BOTH, expand=True, pady=5)
-        
-        files_listbox = tk.Listbox(files_frame, height=5, relief=tk.FLAT, bg=BACKGROUND_COLOR)
-        scrollbar = ttk.Scrollbar(files_frame, orient="vertical", command=files_listbox.yview)
+
+        files_listbox = tk.Listbox(
+            files_frame, height=5, relief=tk.FLAT, bg=BACKGROUND_COLOR
+        )
+        scrollbar = ttk.Scrollbar(
+            files_frame, orient="vertical", command=files_listbox.yview
+        )
         files_listbox.configure(yscrollcommand=scrollbar.set)
         files_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        for f in stats.get('generated_files', []):
+
+        for f in stats.get("generated_files", []):
             files_listbox.insert(tk.END, f"• {f}")
 
         btn_frame = ttk.Frame(self.results_frame)
         btn_frame.pack(fill=tk.X, pady=(10, 0))
 
-        self.output_dir = stats.get('output_dir')
-        ttk.Button(btn_frame, text="Open Output Folder", style="Success.TButton", command=self._open_output_dir).pack(side=tk.LEFT, padx=(0, 5), fill=tk.X, expand=True)
-        ttk.Button(btn_frame, text="Check Settings", style="Secondary.TButton", command=self._edit_settings).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(btn_frame, text="Clear", style="Secondary.TButton", command=self._clear_output).pack(side=tk.LEFT)
+        self.output_dir = stats.get("output_dir")
+        ttk.Button(
+            btn_frame,
+            text="Open Output Folder",
+            style="Success.TButton",
+            command=self._open_output_dir,
+        ).pack(side=tk.LEFT, padx=(0, 5), fill=tk.X, expand=True)
+        ttk.Button(
+            btn_frame,
+            text="Auto Copy File",
+            style="Secondary.TButton",
+            command=self._auto_copy_files_to_clipboard,
+        ).pack(side=tk.LEFT, padx=(0, 5), fill=tk.X, expand=True)
+        ttk.Button(
+            btn_frame,
+            text="Check Settings",
+            style="Secondary.TButton",
+            command=self._edit_settings,
+        ).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(
+            btn_frame,
+            text="Clear",
+            style="Secondary.TButton",
+            command=self._clear_output,
+        ).pack(side=tk.LEFT)
 
         self.results_frame.pack(fill=tk.BOTH, pady=(10, 0), expand=True)
 
     def _clear_output(self):
         if not self.project_path:
             return
-        output_dir_path = os.path.join(self.project_path, '_codebase')
+        output_dir_path = os.path.join(self.project_path, "_codebase")
         if not os.path.isdir(output_dir_path):
             self.status_var.set("Output directory (_codebase) not found.")
             return
@@ -419,20 +608,138 @@ class CodebaseTrackerUI:
             if not os.path.exists(path):
                 messagebox.showerror("Error", f"Path not found: {path}")
                 return
-            if platform.system() == 'Windows':
+            if platform.system() == "Windows":
                 os.startfile(os.path.normpath(path))
-            elif platform.system() == 'Darwin':
-                subprocess.run(['open', path], check=True)
+            elif platform.system() == "Darwin":
+                subprocess.run(["open", path], check=True)
             else:
-                subprocess.run(['xdg-open', path], check=True)
+                subprocess.run(["xdg-open", path], check=True)
         except Exception as e:
             messagebox.showerror("Error", f"Could not open path: {e}")
 
     def _open_output_dir(self):
-        if hasattr(self, 'output_dir') and self.output_dir:
+        if hasattr(self, "output_dir") and self.output_dir:
             self._open_path(self.output_dir)
         elif self.project_path:
-            self._open_path(os.path.join(self.project_path, '_codebase'))
+            self._open_path(os.path.join(self.project_path, "_codebase"))
+
+    def _get_selected_export_formats(self):
+        selected_formats = [
+            fmt for fmt in self.export_format_order if self.format_vars[fmt].get()
+        ]
+        return selected_formats if selected_formats else ["txt"]
+
+    def _resolve_output_file_for_format(self, selected_format, stats):
+        formatter_cls = FORMATTERS.get(selected_format)
+        if not formatter_cls:
+            return None
+        extension = formatter_cls().get_extension()
+        for filename in stats.get("generated_files", []):
+            if filename.endswith(f".{extension}") and filename != "codebase_structure.txt":
+                return filename
+        return None
+
+    def _set_clipboard_files_windows(self, file_paths):
+        dropfiles_header = struct.pack("IiiII", 20, 0, 0, 0, 1)
+        files_blob = ("\0".join(file_paths) + "\0\0").encode("utf-16le")
+        data = dropfiles_header + files_blob
+
+        kernel32 = ctypes.windll.kernel32
+        kernel32.GlobalAlloc.restype = ctypes.c_void_p
+        kernel32.GlobalLock.restype = ctypes.c_void_p
+        kernel32.GlobalLock.argtypes = [ctypes.c_void_p]
+        kernel32.GlobalUnlock.argtypes = [ctypes.c_void_p]
+        kernel32.GlobalFree.argtypes = [ctypes.c_void_p]
+
+        GMEM_MOVEABLE = 0x0002
+        hglobal = kernel32.GlobalAlloc(GMEM_MOVEABLE, len(data))
+        if not hglobal:
+            raise RuntimeError("GlobalAlloc failed.")
+
+        locked = kernel32.GlobalLock(hglobal)
+        if not locked:
+            kernel32.GlobalFree(hglobal)
+            raise RuntimeError("GlobalLock failed.")
+
+        try:
+            ctypes.memmove(locked, data, len(data))
+        finally:
+            kernel32.GlobalUnlock(hglobal)
+
+        try:
+            win32clipboard.SetClipboardData(win32con.CF_HDROP, hglobal)
+        except Exception:
+            kernel32.GlobalFree(hglobal)
+            raise
+
+    def _auto_copy_files_to_clipboard(self):
+        if not WINDOWS_COPY_SUPPORT:
+            messagebox.showerror(
+                "Error",
+                "Auto copy file is supported on Windows with pywin32 installed.",
+            )
+            return
+
+        stats = self.output_stats
+        if not stats:
+            messagebox.showerror("Error", "No output available to copy yet.")
+            return
+
+        output_dir = stats.get("output_dir") or os.path.join(self.project_path, "_codebase")
+        structure_path = stats.get("structure_file") or os.path.join(
+            output_dir, "codebase_structure.txt"
+        )
+
+        if not os.path.exists(output_dir):
+            messagebox.showerror("Error", "Output folder does not exist.")
+            return
+
+        selected_formats = self._get_selected_export_formats()
+        selected_format = selected_formats[0]
+        output_filename = self._resolve_output_file_for_format(selected_format, stats)
+
+        if not output_filename:
+            messagebox.showerror(
+                "Error",
+                f"Output file for format '{selected_format}' not found.",
+            )
+            return
+
+        output_path = os.path.join(output_dir, output_filename)
+        if not os.path.exists(output_path):
+            messagebox.showerror("Error", f"File not found: {output_filename}")
+            return
+        if not os.path.exists(structure_path):
+            messagebox.showerror("Error", "Structure file not found.")
+            return
+
+        try:
+            file_paths = [
+                os.path.normpath(output_path),
+                os.path.normpath(structure_path),
+            ]
+            opened = False
+            win32clipboard.OpenClipboard()
+            opened = True
+            win32clipboard.EmptyClipboard()
+            self._set_clipboard_files_windows(file_paths)
+            win32clipboard.CloseClipboard()
+            self.status_var.set(
+                f"Copied {output_filename} and {Path(structure_path).name} to clipboard."
+            )
+            if len(selected_formats) > 1:
+                self.status_var.set(
+                    f"Copied {output_filename} and {Path(structure_path).name}. "
+                    f"Multiple formats selected; used '{selected_format}'."
+                )
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to copy files: {e}")
+        finally:
+            if "opened" in locals() and opened:
+                try:
+                    win32clipboard.CloseClipboard()
+                except Exception:
+                    pass
 
     def _edit_settings(self):
         if not self.project_path:
@@ -445,7 +752,9 @@ class CodebaseTrackerUI:
         if not self.project_path:
             messagebox.showerror("Error", "Please select a project folder first")
             return
-        if messagebox.askyesno("Reset Settings", "Are you sure you want to reset settings to default?"):
+        if messagebox.askyesno(
+            "Reset Settings", "Are you sure you want to reset settings to default?"
+        ):
             try:
                 scanner = FileScanner(self.project_path)
                 scanner.ignore_rules.reset_settings()

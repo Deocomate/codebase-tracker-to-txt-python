@@ -26,3 +26,10 @@ Thumbs.db
 # Project specific
 _codebase/
 *.log
+.agent/
+.claude/
+.opencode/
+plans/
+AGENTS.md
+ClAUDE.md
+release-manifest.json

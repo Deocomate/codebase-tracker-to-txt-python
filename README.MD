@@ -19,10 +19,11 @@
 ### Tính năng chính
 
 - 🖱️ **Drag & Drop** - Kéo thả thư mục trực tiếp vào ứng dụng
-- 📁 **Multi-output** - Tạo nhiều file output theo cấu hình
+- 📁 **Multi-output** - Tạo nhiều file output theo cấu hình và format
 - 🌳 **Cây thư mục** - Tự động tạo sơ đồ cấu trúc dự án
 - ⚡ **Tối ưu token** - Output gọn gàng, tiết kiệm token cho AI
 - 🔧 **Cấu hình linh hoạt** - Hỗ trợ `.gitignore` và custom patterns
+- 📋 **Auto Copy File** - Copy nhanh 2 file output vào clipboard dạng file
 
 ---
 
@@ -30,7 +31,7 @@
 
 ### Yêu cầu
 
-- Python 3.7+ (khuyến nghị 3.9+)
+- Python 3.12+
 - Git
 
 ### Cài đặt
@@ -81,14 +82,14 @@ sudo dnf install python3 python3-pip python3-tkinter git
 1. **Khởi động** - Chạy `python3 main.py`
 2. **Chọn dự án** - Kéo thả hoặc Browse thư mục
 3. **Scan & Generate** - Nhấn nút để bắt đầu
-4. **Kết quả** - Mở thư mục `_codebase/` để lấy file output
+4. **Kết quả** - Mở thư mục `_codebase/` hoặc bấm **Auto Copy File** để copy file
 
 ### Output Files
 
 | File | Mô tả |
 |------|-------|
 | `codebase_structure.txt` | Cây thư mục dự án |
-| `{config}.txt` | Nội dung source code |
+| `{config}.{format}` | Nội dung source code theo format đã chọn |
 
 ---
 

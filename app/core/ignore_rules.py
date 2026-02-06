@@ -54,6 +54,7 @@ class IgnoreRules:
         # Tách biệt spec: User Settings (Cứng) và Gitignore (Mềm)
         self.user_ignore_spec = None
         self.gitignore_spec = None
+        self.explicit_track_entries = []
 
         self.configs = {}
         self.settings = DEFAULT_SETTINGS.copy()
@@ -115,10 +116,14 @@ class IgnoreRules:
 
         # 3. Compile Configs (Track patterns)
         self.configs = {}
+        self.explicit_track_entries = []
         for config in self.settings.get("track_config", []):
             name = config.get("name", "unnamed")
             tracks = config.get("tracks", ["*"])
             ignores = config.get("ignore_patterns", [])
+
+            explicit_tracks = self._extract_explicit_tracks(tracks)
+            self._register_explicit_tracks(explicit_tracks)
 
             self.configs[name] = {
                 "track_spec": pathspec.PathSpec.from_lines("gitwildmatch", tracks),
@@ -127,6 +132,7 @@ class IgnoreRules:
                     if ignores
                     else None
                 ),
+                "explicit_tracks": explicit_tracks,
             }
 
     def _normalize_path(self, path):
@@ -143,14 +149,77 @@ class IgnoreRules:
                 return str(path).replace(os.sep, "/")
         return str(path).replace(os.sep, "/")
 
+    def _is_glob_pattern(self, pattern):
+        if pattern == "*":
+            return True
+        return any(ch in pattern for ch in ["*", "?", "[", "]"])
+
+    def _normalize_track_path(self, track):
+        normalized = track.strip().replace(os.sep, "/")
+        if normalized.startswith("./"):
+            normalized = normalized[2:]
+        return normalized.strip("/")
+
+    def _extract_explicit_tracks(self, tracks):
+        explicit_tracks = []
+        for track in tracks:
+            if not track or self._is_glob_pattern(track):
+                continue
+            normalized = self._normalize_track_path(track)
+            if not normalized:
+                continue
+            is_dir = track.endswith("/")
+            if not is_dir:
+                try:
+                    abs_path = (self.project_path / normalized).resolve()
+                    if abs_path.exists() and abs_path.is_dir():
+                        is_dir = True
+                except Exception:
+                    is_dir = False
+            track_path = normalized + "/" if is_dir else normalized
+            explicit_tracks.append({"path": track_path, "is_dir": is_dir})
+        return explicit_tracks
+
+    def _register_explicit_tracks(self, explicit_tracks):
+        existing = {(e["path"], e["is_dir"]) for e in self.explicit_track_entries}
+        for entry in explicit_tracks:
+            key = (entry["path"], entry["is_dir"])
+            if key not in existing:
+                self.explicit_track_entries.append(entry)
+                existing.add(key)
+
+    def _matches_explicit_track(self, path_str, is_dir, explicit_tracks):
+        if not explicit_tracks:
+            return False
+
+        path_no_slash = path_str.rstrip("/")
+        for entry in explicit_tracks:
+            entry_path = entry["path"]
+            entry_is_dir = entry["is_dir"]
+
+            if entry_is_dir:
+                entry_no_slash = entry_path.rstrip("/")
+                if path_no_slash == entry_no_slash or path_no_slash.startswith(
+                    entry_no_slash + "/"
+                ):
+                    return True
+                if is_dir and entry_no_slash.startswith(path_no_slash + "/"):
+                    return True
+            else:
+                if path_no_slash == entry_path:
+                    return True
+                if is_dir and entry_path.startswith(path_no_slash + "/"):
+                    return True
+
+        return False
+
     def is_globally_ignored(self, path, is_dir=False):
         """
         Check if path should be ignored.
         Logic:
-        1. Nếu nằm trong settings.json 'global_ignore_patterns' -> BỎ QUA LUÔN (Ví dụ: node_modules)
-        2. Nếu nằm trong .gitignore -> Kiểm tra xem user có 'track' nó không?
-           - Nếu có config nào track nó -> LẤY (Override .gitignore)
-           - Nếu không ai track -> BỎ QUA
+        1. Nếu được liệt kê cụ thể trong tracks (không phải "*") -> LUÔN LẤY
+        2. Nếu nằm trong settings.json 'global_ignore_patterns' -> BỎ QUA
+        3. Nếu nằm trong .gitignore -> BỎ QUA
         """
         path_str = self._normalize_path(path)
 
@@ -162,28 +231,17 @@ class IgnoreRules:
         if is_dir and not check_path.endswith("/"):
             check_path += "/"
 
+        # 1. Track tường minh (ưu tiên cao nhất, bỏ qua ignore khác)
+        if self._matches_explicit_track(path_str, is_dir, self.explicit_track_entries):
+            return False
+
         # 1. Kiểm tra Global Settings (Cấm tuyệt đối)
         # Các file như node_modules, .git sẽ bị chặn ở đây
         if self.user_ignore_spec.match_file(check_path):
             return True
 
-        # 2. Kiểm tra Gitignore (Có thể "khoan hồng" nếu được Track)
+        # 2. Kiểm tra Gitignore (ưu tiên thấp hơn global_ignore)
         if self.gitignore_spec and self.gitignore_spec.match_file(check_path):
-            # File này nằm trong .gitignore. Nhưng user có muốn track nó không?
-            is_tracked_by_any = False
-
-            # Duyệt qua tất cả các configs để xem có ai "tracks" file này không
-            for config in self.configs.values():
-                if config["track_spec"].match_file(path_str):
-                    # Có config muốn track file này -> Không ignore nữa
-                    is_tracked_by_any = True
-                    break
-
-            # Nếu được track -> False (Không ignore)
-            if is_tracked_by_any:
-                return False
-
-            # Nếu không được track -> True (Ignore theo gitignore)
             return True
 
         return False
@@ -199,6 +257,11 @@ class IgnoreRules:
         matching = []
 
         for name, specs in self.configs.items():
+            if self._matches_explicit_track(
+                path_str, is_dir=False, explicit_tracks=specs.get("explicit_tracks")
+            ):
+                matching.append(name)
+                continue
             if specs["track_spec"].match_file(path_str):
                 # Check config-specific ignores
                 if specs["ignore_spec"] and specs["ignore_spec"].match_file(path_str):

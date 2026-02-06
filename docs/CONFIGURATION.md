@@ -85,6 +85,19 @@ Danh sách pattern bỏ qua toàn cục (áp dụng cho tất cả configs):
 
 ---
 
+## Thứ tự ưu tiên ignore
+
+Khi quyết định một file/folder có được quét hay không, ứng dụng áp dụng thứ tự sau:
+
+1. **Tracks tường minh**: Nếu `tracks` liệt kê rõ đường dẫn tương đối (không dùng `*`), file/folder đó **luôn được giữ lại**.
+2. **ignore_patterns**: Bỏ qua theo cấu hình riêng của từng `track_config`.
+3. **global_ignore_patterns**: Bỏ qua toàn cục trong `settings.json`.
+4. **.gitignore**: Bỏ qua theo `.gitignore` của dự án.
+
+> **Lưu ý:** `tracks: ["*"]` không được xem là track tường minh và **không override** `.gitignore`.
+
+---
+
 ## Pattern Syntax
 
 Sử dụng glob pattern (gitwildmatch style):
@@ -114,7 +127,7 @@ Sau khi scan, các file được tạo trong `_codebase/`:
 | File | Mô tả |
 |------|-------|
 | `codebase_structure.txt` | Cây thư mục của dự án |
-| `{config_name}.txt` | Nội dung source code theo từng config |
+| `{config_name}.{format}` | Nội dung source code theo từng config và format |
 
 **Format output tối ưu cho AI:**
 
