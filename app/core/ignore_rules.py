@@ -40,6 +40,11 @@ DEFAULT_SETTINGS = {
         "*.swp",
         "*.DS_Store",
     ],
+    "split_config": {
+        "enabled": True,
+        "split_count": 5,
+        "token_threshold": 40000
+    },
     "description": "Configure multiple output files based on track patterns.",
 }
 

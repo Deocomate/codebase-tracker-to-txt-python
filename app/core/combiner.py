@@ -4,6 +4,7 @@ from pathlib import Path
 from app.utils.file_utils import ensure_directory
 from app.core.tree_builder import TreeBuilder
 from app.core.formatters import FORMATTERS
+from app.core.file_splitter import split_output_file
 
 
 class FileCombiner:
@@ -23,6 +24,7 @@ class FileCombiner:
         callback=None,
         cancel_event=None,
         export_formats=None,
+        split_count=None,
     ):
         """Combine files into output files in selected formats."""
         timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -31,6 +33,16 @@ class FileCombiner:
         # Default to TXT if no formats specified (backward compatibility)
         if not export_formats:
             export_formats = ["txt"]
+
+        # Load split config from settings
+        split_config = ignore_rules.settings.get("split_config", {})
+        split_enabled = split_config.get("enabled", True)
+        if split_count is None:
+            split_count = split_config.get("split_count", 5)
+        elif split_count == 0:
+            # UI explicitly disabled splitting
+            split_enabled = False
+            split_count = 5
 
         # Generate structure file
         if all_files:
@@ -94,6 +106,32 @@ class FileCombiner:
 
                     generated_files.append(output_filename)
                     total_stats["total_chars"] += chars_written
+
+                    # Auto-split if enabled and format is txt
+                    if split_enabled and fmt == "txt":
+                        if callback:
+                            callback(
+                                f"Splitting {output_filename} into {split_count} parts...",
+                                progress,
+                            )
+                        split_files = split_output_file(
+                            str(output_path),
+                            split_count=split_count,
+                        )
+                        if split_files:
+                            # Remove original file and its entry
+                            try:
+                                os.remove(output_path)
+                            except OSError:
+                                pass
+                            generated_files.remove(output_filename)
+                            for sf in split_files:
+                                generated_files.append(os.path.basename(sf))
+                            if callback:
+                                callback(
+                                    f"Split into {len(split_files)} parts (original removed).",
+                                    progress,
+                                )
 
                 except Exception as e:
                     print(f"Error creating {output_filename}: {e}")

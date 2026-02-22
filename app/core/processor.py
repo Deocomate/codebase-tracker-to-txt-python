@@ -15,6 +15,7 @@ class ProjectProcessor:
         combine_callback,
         cancel_event: threading.Event,
         export_formats=None,
+        split_count=None,
     ):
         """Run the full scan and combine process."""
         try:
@@ -41,6 +42,7 @@ class ProjectProcessor:
                 callback=combine_callback,
                 cancel_event=cancel_event,
                 export_formats=export_formats,
+                split_count=split_count,
             )
 
             if cancel_event.is_set():

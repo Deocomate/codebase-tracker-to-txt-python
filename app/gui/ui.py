@@ -217,6 +217,25 @@ class CodebaseTrackerUI:
             cb = ttk.Checkbutton(format_frame, text=label, variable=var)
             cb.pack(side=tk.LEFT, padx=(0, 15))
 
+        # Split Options
+        split_frame = ttk.LabelFrame(main_frame, text="Auto Split (TXT)", padding="10")
+        split_frame.pack(fill=tk.X, pady=(0, 10))
+
+        self.split_enabled_var = tk.BooleanVar(value=True)
+        split_cb = ttk.Checkbutton(
+            split_frame, text="Enable", variable=self.split_enabled_var,
+            command=self._toggle_split_controls,
+        )
+        split_cb.pack(side=tk.LEFT, padx=(0, 10))
+
+        ttk.Label(split_frame, text="Parts:").pack(side=tk.LEFT, padx=(0, 5))
+        self.split_count_var = tk.IntVar(value=5)
+        self.split_spinbox = tk.Spinbox(
+            split_frame, from_=2, to=20, width=4,
+            textvariable=self.split_count_var, font=FONT_NORMAL,
+        )
+        self.split_spinbox.pack(side=tk.LEFT, padx=(0, 15))
+
         # Actions
         actions_frame = ttk.Frame(main_frame)
         actions_frame.pack(fill=tk.X, pady=(0, 10))
@@ -433,6 +452,20 @@ class CodebaseTrackerUI:
             self.cancel_event.set()
             self.cancel_btn.config(state=tk.DISABLED, text="Cancelling...")
 
+    def _toggle_split_controls(self):
+        """Enable/disable split spinbox based on checkbox state."""
+        state = tk.NORMAL if self.split_enabled_var.get() else tk.DISABLED
+        self.split_spinbox.config(state=state)
+
+    def _get_split_count(self):
+        """Get the split count from UI, or None if splitting is disabled."""
+        if not self.split_enabled_var.get():
+            return 0  # 0 signals disabled
+        try:
+            return max(2, self.split_count_var.get())
+        except (tk.TclError, ValueError):
+            return 5
+
     def _scan_project(self):
         if not self.project_path:
             messagebox.showerror("Error", "Please select a valid project folder first.")
@@ -473,6 +506,7 @@ class CodebaseTrackerUI:
                 self._combine_callback,
                 self.cancel_event,
                 selected_formats,
+                split_count=self._get_split_count(),
             )
 
             if self.cancel_event.is_set():
@@ -656,47 +690,28 @@ class CodebaseTrackerUI:
             return
 
         output_dir = stats.get("output_dir") or os.path.join(self.project_path, "_codebase")
-        structure_path = stats.get("structure_file") or os.path.join(
-            output_dir, "codebase_structure.txt"
-        )
 
         if not os.path.exists(output_dir):
             messagebox.showerror("Error", "Output folder does not exist.")
             return
 
-        selected_formats = self._get_selected_export_formats()
-        selected_format = selected_formats[0]
-        output_filename = self._resolve_output_file_for_format(selected_format, stats)
+        # Collect all generated files that exist on disk
+        file_paths = []
+        for filename in stats.get("generated_files", []):
+            full_path = os.path.join(output_dir, filename)
+            if os.path.exists(full_path):
+                file_paths.append(os.path.normpath(full_path))
 
-        if not output_filename:
-            messagebox.showerror(
-                "Error",
-                f"Output file for format '{selected_format}' not found.",
-            )
-            return
-
-        output_path = os.path.join(output_dir, output_filename)
-        if not os.path.exists(output_path):
-            messagebox.showerror("Error", f"File not found: {output_filename}")
-            return
-        if not os.path.exists(structure_path):
-            messagebox.showerror("Error", "Structure file not found.")
+        if not file_paths:
+            messagebox.showerror("Error", "No generated files found to copy.")
             return
 
         try:
-            file_paths = [
-                os.path.normpath(output_path),
-                os.path.normpath(structure_path),
-            ]
             copy_files_to_clipboard(file_paths)
+            names = [os.path.basename(p) for p in file_paths]
             self.status_var.set(
-                f"Copied {output_filename} and {Path(structure_path).name} to clipboard."
+                f"Copied {len(names)} files to clipboard: {', '.join(names)}"
             )
-            if len(selected_formats) > 1:
-                self.status_var.set(
-                    f"Copied {output_filename} and {Path(structure_path).name}. "
-                    f"Multiple formats selected; used '{selected_format}'."
-                )
         except Exception as e:
             messagebox.showerror("Error", f"Failed to copy files: {e}")
 
