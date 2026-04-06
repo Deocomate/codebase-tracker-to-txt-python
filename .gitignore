@@ -24,10 +24,12 @@ dist/
 Thumbs.db
 
 # Project specific
+GEMINI.md
 _codebase/
 *.log
+.agents/
 .agent/
-.claude/
+.agents/
 .opencode/
 plans/
 AGENTS.md

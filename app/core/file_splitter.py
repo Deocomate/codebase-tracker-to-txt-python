@@ -157,21 +157,40 @@ def _chunk_large_block(block: str, max_tokens: int) -> list[str]:
     current: list[str] = []
     # Reserve tokens for the header that will be prepended to each chunk
     reserved = estimate_tokens(header_line) + 10
+    current_tokens = 0
 
     for line in content_lines:
         line_tokens = estimate_tokens(line)
-        current_tokens = estimate_tokens("\n".join(current)) if current else 0
-        if current and current_tokens + line_tokens + reserved > max_tokens:
+        # +1 accounts for the newline separator between lines
+        added_tokens = line_tokens + (1 if current else 0)
+        if current and current_tokens + added_tokens + reserved > max_tokens:
             chunks.append(current)
             current = [line]
+            current_tokens = line_tokens
         else:
             current.append(line)
+            current_tokens += added_tokens
 
     if current:
         chunks.append(current)
 
-    # No real split happened (only 1 chunk) — return as-is
+    # Fallback: if line-level split produced only 1 chunk (e.g. a single
+    # massive line like minified JS), split on character boundaries instead.
     if len(chunks) <= 1:
+        from app.core.token_counter import CHARS_PER_TOKEN
+        full_content = "\n".join(content_lines)
+        chars_per_chunk = max(1, (max_tokens - reserved) * CHARS_PER_TOKEN)
+        if len(full_content) > chars_per_chunk:
+            char_chunks = [
+                full_content[i:i + chars_per_chunk]
+                for i in range(0, len(full_content), chars_per_chunk)
+            ]
+            total = len(char_chunks)
+            result = []
+            for i, chunk_text in enumerate(char_chunks, start=1):
+                chunk_header = f"{header_line} (Part {i}/{total})"
+                result.append(chunk_header + "\n" + chunk_text)
+            return result
         return [block]
 
     total = len(chunks)
@@ -184,22 +203,24 @@ def _chunk_large_block(block: str, max_tokens: int) -> list[str]:
 
 
 def _distribute_blocks(blocks: list[str], split_count: int) -> list[list[str]]:
-    """Distribute file blocks across parts using sequential distribution.
+    """Distribute file blocks across parts using LPT bin-packing.
 
-    Preserves the original track order (highest-priority files always land
-    in codebase_1, next batch in codebase_2, etc.).  Files whose token count
-    exceeds ``target_per_part`` are pre-split by :func:`_chunk_large_block`
-    so no single file is left unsplit.
+    Uses the Longest Processing Time (LPT) heuristic to achieve
+    near-optimal token balance across parts.  Each block is assigned
+    to the part with the fewest accumulated tokens.  Original file
+    order is preserved within each part.
 
     Algorithm
     ---------
     1. Compute ``target_per_part = total_tokens / split_count``.
     2. Pre-process: any block larger than ``target_per_part`` is expanded
        into smaller line-based chunks (preserving header context).
-    3. Walk through the (possibly expanded) block list sequentially.
-       When the running token total of the current part would exceed the
-       target **and** there are still remaining parts to fill, advance to
-       the next part.
+    3. Tag every (possibly expanded) block with its original index.
+    4. Sort blocks by token count **descending** (largest first).
+    5. Assign each block to the bin (part) with the smallest current
+       token total.
+    6. Sort blocks inside each bin by original index to restore
+       the natural file order within that part.
 
     Args:
         blocks: List of file content blocks **in track order**.
@@ -217,28 +238,47 @@ def _distribute_blocks(blocks: list[str], split_count: int) -> list[list[str]]:
     target_per_part = max(1, total_tokens // max(1, split_count))
 
     # Step 2 – pre-split any block that alone exceeds the target
-    processed: list[str] = []
+    processed: list[tuple[int, str]] = []  # (original_index, block)
+    orig_idx = 0
     for block, tokens in raw_token_pairs:
         if tokens > target_per_part:
-            processed.extend(_chunk_large_block(block, target_per_part))
+            for chunk in _chunk_large_block(block, target_per_part):
+                processed.append((orig_idx, chunk))
         else:
-            processed.append(block)
+            processed.append((orig_idx, block))
+        orig_idx += 1
 
-    # Step 3 – sequential distribution (preserves order)
-    parts: list[list[str]] = [[]]
-    current_tokens = 0
-    current_part_idx = 0
-    max_part_idx = split_count - 1
+    # Step 3 – compute tokens for processed blocks
+    indexed_blocks = [
+        (idx, blk, estimate_tokens(blk)) for idx, blk in processed
+    ]
 
-    for block in processed:
-        tokens = estimate_tokens(block)
-        # Advance to next part when budget is exhausted (but never exceed split_count)
-        if current_tokens > 0 and current_tokens + tokens > target_per_part and current_part_idx < max_part_idx:
-            parts.append([])
-            current_part_idx += 1
-            current_tokens = 0
+    # Step 4 – sort by token count descending (LPT: largest first)
+    sorted_blocks = sorted(indexed_blocks, key=lambda x: x[2], reverse=True)
 
-        parts[current_part_idx].append(block)
-        current_tokens += tokens
+    # Step 5 – assign each block to the least-loaded bin
+    actual_parts = min(split_count, len(sorted_blocks))
+    bins: list[list[tuple[int, str]]] = [[] for _ in range(actual_parts)]
+    bin_tokens: list[int] = [0] * actual_parts
 
-    return [p for p in parts if p]
+    for orig_idx, blk, tokens in sorted_blocks:
+        # Find the bin with the smallest current total
+        min_bin = min(range(actual_parts), key=lambda i: bin_tokens[i])
+        bins[min_bin].append((orig_idx, blk))
+        bin_tokens[min_bin] += tokens
+
+    # Step 6 – restore original file order within each bin
+    # and sort parts by their earliest original index
+    part_with_min_idx: list[tuple[int, list[str]]] = []
+    for bin_items in bins:
+        if bin_items:
+            bin_items.sort(key=lambda x: x[0])
+            min_idx = bin_items[0][0]
+            part_with_min_idx.append(
+                (min_idx, [blk for _, blk in bin_items])
+            )
+
+    # Sort parts so part 1 starts with the earliest original files
+    part_with_min_idx.sort(key=lambda x: x[0])
+
+    return [blocks for _, blocks in part_with_min_idx]
